@@ -375,7 +375,6 @@ def analyze_sz50_stocks_pettm(period="10Y", end_date=None):
     print('\n1. 获取上证50成分股列表...')
     sz50_stocks = get_sz50_stocks()
     if sz50_stocks is None or sz50_stocks.empty:
-        print('获取上证50成分股列表失败')
         return None
     
     print(f'共获取 {len(sz50_stocks)} 只股票')
@@ -400,6 +399,8 @@ def analyze_sz50_stocks_pettm(period="10Y", end_date=None):
             continue
         
         last_pettm = pettm_data['last_pettm']
+        if last_pettm < 0:
+            print(f'  └─ ✗ 不符合: 最新peTTM={last_pettm:.4f} >= 平均peTTM={mean_pettm:.4f}\n')
         mean_pettm = pettm_data['mean_pettm']
         
         # 判断最新peTTM是否小于平均peTTM
@@ -411,7 +412,7 @@ def analyze_sz50_stocks_pettm(period="10Y", end_date=None):
                 'mean_pettm': mean_pettm,
                 'last_trading_date': pettm_data['last_trading_date'],
                 'diff': mean_pettm - last_pettm,  # 差值
-                'diff_pct': (mean_pettm - last_pettm) / mean_pettm * 100  # 差值百分比
+                'diff_pct': (mean_pettm - last_pettm) / last_pettm * 100  # 差值百分比
             })
             print(f'  └─ ✓ 符合条件: 最新peTTM={last_pettm:.4f} < 平均peTTM={mean_pettm:.4f}\n')
         else:

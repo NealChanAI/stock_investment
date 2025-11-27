@@ -219,8 +219,7 @@ def get_pe_info(stock_code, target_date=None, period=["10Y", "5Y"]):
     ].copy()
     
     # 过滤掉NaN值并计算均值
-    valid_pettm_5y = pettm_5y['peTTM']
-    # valid_pettm_5y = pettm_5y['peTTM'].dropna()
+    valid_pettm_5y = pettm_5y['peTTM'].dropna()
     if valid_pettm_5y.empty:
         mean_pettm_5y = None
         print(f'最近5年没有有效的peTTM数据')

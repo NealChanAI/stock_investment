@@ -11,12 +11,12 @@ def _main():
 
 
 def main():
-    # df = ak.stock_gdfx_top_10_em(symbol='SH601888', date='20250630')
-    # print(df.columns)
-    # print(df.head(10))
+    df = ak.stock_gdfx_top_10_em(symbol='SH601888', date='20250630')
+    print(df.columns)
+    print(df.head(10))
 
-    stock_board_industry_summary_ths_df = ak.stock_board_industry_summary_ths()
-    print(stock_board_industry_summary_ths_df['板块'].to_list())
+    # stock_board_industry_summary_ths_df = ak.stock_board_industry_summary_ths()
+    # print(stock_board_industry_summary_ths_df['板块'].to_list())
 
 if __name__ == "__main__":
     main()

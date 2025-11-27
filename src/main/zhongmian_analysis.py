@@ -113,7 +113,7 @@ def get_history_pettm_data(stock_code, start_date='2000-01-01', end_date=None):
     try:
         rs = bs.query_history_k_data_plus(
                 stock_code,
-                "date,code,peTTM",  # 只获取日期和滚动市盈率
+                "date,code,peTTM,pbMRQ",  # 获取peTTM与pbMRQ
                 start_date=start_date,
                 end_date=end_date,
                 frequency="d",  # 日线数据
@@ -137,8 +137,9 @@ def get_history_pettm_data(stock_code, start_date='2000-01-01', end_date=None):
         # 转换为DataFrame
         result = pd.DataFrame(data_list, columns=rs.fields)
         
-        # 将 peTTM 转换为数值类型
+        # 将 peTTM、pbMRQ 转换为数值类型
         result['peTTM'] = pd.to_numeric(result['peTTM'], errors='coerce')
+        result['pbMRQ'] = pd.to_numeric(result['pbMRQ'], errors='coerce')
         
         # 按日期排序
         result = result.sort_values('date').reset_index(drop=True)
@@ -165,13 +166,14 @@ def get_pe_info(stock_code, target_date=None, period=["10Y", "5Y"]):
     if pettm_df is None:
         return 
     
-    # 获取目标日期的peTTM
+    # 获取目标日期的peTTM、pbMRQ
     target_date_mask = pettm_df['date'] == last_trading_date
     if not target_date_mask.any():
         print(f'目标日期 {last_trading_date} 不在数据中')
         return None
     
     pettm_at_date = pettm_df.loc[target_date_mask, 'peTTM'].values[0]
+    pbmrq_at_date = pettm_df.loc[target_date_mask, 'pbMRQ'].values[0]
     
     # 确保日期列是datetime类型
     pettm_df['date'] = pd.to_datetime(pettm_df['date'])
@@ -227,11 +229,31 @@ def get_pe_info(stock_code, target_date=None, period=["10Y", "5Y"]):
         mean_pettm_5y = float(valid_pettm_5y.mean())
         print(f'最近5年平均peTTM: {mean_pettm_5y:.4f} (基于 {len(valid_pettm_5y)} 条有效数据)')
     
+    # pbMRQ统计
+    valid_pbmrq_10y = pettm_10y['pbMRQ'].dropna()
+    if valid_pbmrq_10y.empty:
+        mean_pbmrq_10y = None
+        print(f'最近10年没有有效的pbMRQ数据')
+    else:
+        mean_pbmrq_10y = float(valid_pbmrq_10y.mean())
+        print(f'最近10年平均pbMRQ: {mean_pbmrq_10y:.4f} (基于 {len(valid_pbmrq_10y)} 条有效数据)')
+
+    valid_pbmrq_5y = pettm_5y['pbMRQ'].dropna()
+    if valid_pbmrq_5y.empty:
+        mean_pbmrq_5y = None
+        print(f'最近5年没有有效的pbMRQ数据')
+    else:
+        mean_pbmrq_5y = float(valid_pbmrq_5y.mean())
+        print(f'最近5年平均pbMRQ: {mean_pbmrq_5y:.4f} (基于 {len(valid_pbmrq_5y)} 条有效数据)')
+
     return {
         'target_date': target_date,
         'pettm_at_date': float(pettm_at_date),
         'mean_pettm_10y': mean_pettm_10y,
-        'mean_pettm_5y': mean_pettm_5y
+        'mean_pettm_5y': mean_pettm_5y,
+        'pbmrq_at_date': float(pbmrq_at_date),
+        'mean_pbmrq_10y': mean_pbmrq_10y,
+        'mean_pbmrq_5y': mean_pbmrq_5y
     }
 
 

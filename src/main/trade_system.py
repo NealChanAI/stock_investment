@@ -33,7 +33,7 @@ def load_all_codes(csv_path: Path):
     return records.to_dict("records")
 
 
-def save_results(result_rows, output_dir: Path):
+def save_results(result_rows, output_dir: Path, file_name: str):
     """将结果保存到CSV，优先使用utf-8-sig，失败时回退到gbk."""
     if not result_rows:
         print("没有可保存的结果")
@@ -41,7 +41,7 @@ def save_results(result_rows, output_dir: Path):
 
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_path = output_dir / f"sz50_pe_info_{timestamp}.csv"
+    output_path = output_dir / f"{file_name}_{timestamp}.csv"
 
     result_df = pd.DataFrame(result_rows)
     try:
@@ -55,7 +55,10 @@ def save_results(result_rows, output_dir: Path):
 
 def main():
     project_root = Path(__file__).resolve().parents[2]
-    csv_path = project_root / "data" / "sz50_stocks.csv"
+    # input_file_name = "sz50_stocks.csv"
+    input_file_name = "hs300_stocks.csv"
+    output_file_name = input_file_name.replace(".csv", "")
+    csv_path = project_root / "data" / input_file_name
 
     try:
         stock_infos = load_all_codes(csv_path)
@@ -83,8 +86,11 @@ def main():
 
         print(f"[{code} {code_name}] target_date={pe_info['target_date']}, "
               f"peTTM={pe_info['pettm_at_date']}, "
-              f"mean_10Y={pe_info['mean_pettm_10y']}, "
-              f"mean_5Y={pe_info['mean_pettm_5y']}")
+              f"mean_peTTM_10Y={pe_info['mean_pettm_10y']}, "
+              f"mean_peTTM_5Y={pe_info['mean_pettm_5y']}, "
+              f"pbMRQ={pe_info['pbmrq_at_date']}, "
+              f"mean_pbMRQ_10Y={pe_info['mean_pbmrq_10y']}, "
+              f"mean_pbMRQ_5Y={pe_info['mean_pbmrq_5y']}")
 
         results.append(
             {
@@ -94,12 +100,15 @@ def main():
                 "peTTM": pe_info["pettm_at_date"],
                 "mean_peTTM_5Y": pe_info["mean_pettm_5y"],
                 "mean_peTTM_10Y": pe_info["mean_pettm_10y"],
+                "pbMRQ": pe_info["pbmrq_at_date"],
+                "mean_pbMRQ_5Y": pe_info["mean_pbmrq_5y"],
+                "mean_pbMRQ_10Y": pe_info["mean_pbmrq_10y"],
             }
         )
 
     if results:
         output_dir = project_root / "data" / "pe_info"
-        save_results(results, output_dir)
+        save_results(results, output_dir, output_file_name)
     else:
         print("未获取到任何有效的PE结果，跳过保存。")
 

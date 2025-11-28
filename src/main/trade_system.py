@@ -2,6 +2,7 @@ from pathlib import Path
 from datetime import datetime
 from os import path as osp  
 import pandas as pd
+import os
 
 from stock_analysis import get_stock_info
 
@@ -50,8 +51,14 @@ def post_process_results(result_rows):
     res_df['predict_revenue_5y'] = res_df.apply(lambda row: (row['mean_pettm_5y'] / row['pettm_at_date']) ** (1/2) * (1 + row['mean_e_growth_rate']) - 1, axis=1)
     # 10年均值回归的收益率
     res_df['predict_revenue_10y'] = res_df.apply(lambda row: (row['mean_pettm_10y'] / row['pettm_at_date']) ** (1/2) * (1 + row['mean_e_growth_rate']) - 1, axis=1)
+    # 每股净利润增长率格式化
+    res_df['mean_e_growth_rate'] = (res_df['mean_e_growth_rate'] * 100).map(lambda x: f"{x:.2f}%")
+    # 5年均值回归的收益率格式化
+    res_df['predict_revenue_5y'] = (res_df['predict_revenue_5y'] * 100).map(lambda x: f"{x:.2f}%")
+    # 10年均值回归的收益率
+    res_df['predict_revenue_10y'] = (res_df['predict_revenue_10y'] * 100).map(lambda x: f"{x:.2f}%")
 
-    res_df.columns = [
+    cols = [
         "target_date",
         "stock_code",
         "stock_name",
@@ -63,33 +70,47 @@ def post_process_results(result_rows):
         "predict_revenue_5y",
         "predict_revenue_10y",
         "pbmrq_at_date",
-        "mean_pbmrq_10y",
         "mean_pbmrq_5y",
+        "mean_pbmrq_10y",
         "report_infos"
     ]
 
+    cols_zh = [
+        "日期",
+        "股票代码",
+        "股票名称",
+        "5年均值回归的市盈率",
+        "10年均值回归的市盈率",
+        "最新市盈率",
+        "预估每股净利润增长率(%)",
+        "PEG",
+        "5年均值PE回归的收益率(%)",
+        "10年均值PE回归的收益率(%)",
+        "最新市净率",
+        "5年均值回归的市净率",
+        "10年均值回归的市净率",
+        "报告信息"
+    ]
 
-    
+    res_df = res_df[cols]
+    res_df.columns = cols_zh
+
+    return res_df 
 
 
-def save_results(result_rows, output_dir: str, file_name: str):
-    """将结果保存到CSV，优先使用utf-8-sig，失败时回退到gbk."""
-    if not result_rows:
+def save_results(res_df, output_dir: str, file_name: str):
+    """将结果保存到CSV"""
+    if res_df is None:
         print("没有可保存的结果")
         return
 
-    osp.makedirs(output_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_path = osp.join(output_dir, f"{file_name}_{timestamp}.csv")
 
-    result_df = pd.DataFrame(result_rows)
-    try:
-        result_df.to_csv(output_path, index=False, encoding="utf-8-sig")
-        print(f"结果已保存至 {output_path} (utf-8-sig)")
-    except UnicodeEncodeError:
-        fallback_path = osp.join(output_dir, f"{file_name}_{timestamp}.gbk.csv")
-        result_df.to_csv(fallback_path, index=False, encoding="gbk")
-        print(f"utf-8 编码失败，改用 GBK 保存至 {fallback_path}")
+    res_df.to_csv(output_path, index=False, encoding="utf-8")
+    print(f"结果已保存至 {output_path}")
+
 
 
 def process_stocks(csv_path: str = STOCK_LIST_FILE, output_dir: str = OUTPUT_DIR, file_name: str = "stock_analysis"):
@@ -142,7 +163,8 @@ def process_stocks(csv_path: str = STOCK_LIST_FILE, output_dir: str = OUTPUT_DIR
     # 保存结果
     print(f"\n处理完成，成功处理 {len(result_rows)}/{total} 只股票")
     if result_rows:
-        save_results(result_rows, output_dir, file_name)
+        processed_df = post_process_results(result_rows)
+        save_results(processed_df, output_dir, file_name)
     else:
         print("没有成功处理任何股票，不保存结果")
 

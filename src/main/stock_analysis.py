@@ -1,22 +1,15 @@
-# -*- coding:utf-8 -*-
+"""
+zhongmian stock analysis
+"""
 
-import baostock as bs
 import pandas as pd
+import baostock as bs
+import akshare as ak
 from datetime import datetime, timedelta
-import os 
-import re
-import sys
-from io import StringIO
-import matplotlib.pyplot as plt
-import matplotlib
-# 设置中文字体
-matplotlib.rcParams['font.sans-serif'] = ['SimHei']  # 用来正常显示中文标签
-matplotlib.rcParams['axes.unicode_minus'] = False  # 用来正常显示负号 
-
-STOCK_CODE = "sh.601888"
 
 
 def baostock_login():
+    """baostock login"""
     lg = bs.login()
     if lg.error_code != '0':
         print('login respond error_code:' + lg.error_code)
@@ -25,166 +18,10 @@ def baostock_login():
     return lg
 
 def baostock_logout(lg):
+    """baostock logout"""
     if lg is not None:
         bs.logout()
     return None
-
-
-
-def get_stock_data(lg, stock_code):
-    pass 
-
-
-def get_last_trading_date_before(end_date):
-    """
-    获取指定日期之前最近的上一个交易日
-    
-    Args:
-        end_date (str): 日期字符串，格式为 YYYY-MM-DD
-    
-    Returns:
-        str: 上一个交易日的日期字符串，格式为 YYYY-MM-DD，如果出错返回 None
-    """
-    # 将字符串转换为日期对象
-    try:
-        end_date_obj = datetime.strptime(end_date, '%Y-%m-%d')
-    except ValueError:
-        print(f'日期格式错误: {end_date}，应为 YYYY-MM-DD 格式')
-        return None
-    
-    # 获取指定日期之前30天的交易日数据，确保能找到上一个交易日
-    start_date = (end_date_obj - timedelta(days=30)).strftime('%Y-%m-%d')
-    
-    rs = bs.query_trade_dates(start_date=start_date, end_date=end_date)
-    if rs.error_code != '0':
-        print(f'query_trade_dates respond error_code: {rs.error_code}')
-        print(f'query_trade_dates respond error_msg: {rs.error_msg}')
-        return None
-    
-    # 获取所有交易日
-    trading_dates = []
-    while (rs.error_code == '0') & rs.next():
-        row_data = rs.get_row_data()
-        if row_data[1] == '1':  # is_trading_day == '1' 表示是交易日
-            trading_date = row_data[0]  # calendar_date
-            # 只保留小于等于 end_date 的交易日
-            if trading_date <= end_date:
-                trading_dates.append(trading_date)
-    
-    if not trading_dates:
-        return None
-    
-    # 返回最后一个交易日（即上一个交易日）
-    return sorted(trading_dates)[-1]
-
-
-def parse_period(period):
-    """
-    解析周期参数，支持 "10Y" 格式或整数格式
-    
-    Args:
-        period: 周期，可以是字符串如 "10Y" 或整数如 10
-    
-    Returns:
-        int: 年份数
-    """
-    if isinstance(period, int):
-        return period
-    elif isinstance(period, str):
-        # 匹配 "10Y", "5Y" 等格式
-        match = re.match(r'^(\d+)Y$', period.upper())
-        if match:
-            return int(match.group(1))
-        else:
-            # 如果不是 "XY" 格式，尝试直接转换为整数
-            try:
-                return int(period)
-            except ValueError:
-                print(f'无法解析周期参数: {period}，使用默认值10年')
-                return 10
-    else:
-        print(f'周期参数类型错误: {type(period)}，使用默认值10年')
-        return 10
-
-
-def get_history_pettm_data(stock_code, end_date, period="10Y"):
-    """
-    获取股票代码的历史 peTTM 数据
-    
-    Args:
-        stock_code (str): 股票代码，格式如 "sh.601888" 或 "sz.000001"
-        end_date (str): 结束日期，格式为 YYYY-MM-DD
-        period: 时间跨度，可以是字符串如 "10Y" 或整数如 10，默认 "10Y"（10年）
-    
-    Returns:
-        pandas.DataFrame: 包含 date 和 peTTM 列的 DataFrame，如果出错返回 None
-    """
-    lg = baostock_login()
-    
-    try:
-        # 解析周期参数
-        period_years = parse_period(period)
-        print(f'查询周期: {period_years}年')
-        
-        # 获取距离 end_date 最近的上一个交易日
-        last_trading_date = get_last_trading_date_before(end_date)
-        if last_trading_date is None:
-            print('无法获取上一个交易日')
-            return None
-        
-        print(f'结束日期: {end_date}，上一个交易日: {last_trading_date}')
-        
-        # 计算N年前的日期（使用年份减去，更准确）
-        last_date = datetime.strptime(last_trading_date, '%Y-%m-%d')
-        start_year = last_date.year - period_years
-        # 处理闰年2月29日的情况
-        try:
-            start_date = datetime(start_year, last_date.month, last_date.day).strftime('%Y-%m-%d')
-        except ValueError:
-            # 如果目标年份不是闰年且日期是2月29日，则使用2月28日
-            start_date = datetime(start_year, last_date.month, 28).strftime('%Y-%m-%d')
-        
-        print(f'查询日期范围: {start_date} 至 {last_trading_date}')
-        
-        # 查询历史K线数据，只获取 date 和 peTTM 字段
-        rs = bs.query_history_k_data_plus(
-            stock_code,
-            "date,peTTM",  # 只获取日期和滚动市盈率
-            start_date=start_date,
-            end_date=last_trading_date,
-            frequency="d",  # 日线数据
-            adjustflag="3"  # 不复权
-        )
-        
-        if rs.error_code != '0':
-            print(f'query_history_k_data_plus respond error_code: {rs.error_code}')
-            print(f'query_history_k_data_plus respond error_msg: {rs.error_msg}')
-            return None
-        
-        # 处理结果集
-        data_list = []
-        while (rs.error_code == '0') & rs.next():
-            data_list.append(rs.get_row_data())
-        
-        if not data_list:
-            print('未获取到数据')
-            return None
-        
-        # 转换为DataFrame
-        result = pd.DataFrame(data_list, columns=rs.fields)
-        
-        # 将 peTTM 转换为数值类型
-        result['peTTM'] = pd.to_numeric(result['peTTM'], errors='coerce')
-        
-        # 按日期排序
-        result = result.sort_values('date').reset_index(drop=True)
-        
-        print(f'成功获取 {len(result)} 条 peTTM 数据')
-        return result
-        
-    finally:
-        baostock_logout(lg)
-
 
 def get_pettm_mean(pettm_df):
     """
@@ -224,46 +61,86 @@ def get_pettm_mean(pettm_df):
     # 转换为Python原生float类型
     mean_value = float(mean_value)
     
-    print(f'peTTM均值: {mean_value:.4f} (基于 {len(valid_pettm)} 条有效数据)')
+    # print(f'peTTM均值: {mean_value:.4f} (基于 {len(valid_pettm)} 条有效数据)')
     return mean_value
 
-
-def get_sz50_stocks():
+def get_history_pettm_data(stock_code, end_date, period="10Y"):
     """
-    获取上证50成分股列表
+    获取股票代码的历史 peTTM 数据
+    
+    Args:
+        stock_code (str): 股票代码，格式如 "sh.601888" 或 "sz.000001"
+        end_date (str): 结束日期，格式为 YYYY-MM-DD
+        period: 时间跨度，可以是字符串如 "10Y" 或整数如 10，默认 "10Y"（10年）
     
     Returns:
-        pandas.DataFrame: 包含股票代码和股票名称的DataFrame，如果获取失败返回None
+        pandas.DataFrame: 包含 date 和 peTTM 列的 DataFrame，如果出错返回 None
     """
     lg = baostock_login()
-    if lg is None:
-        return None
     
     try:
-        # 获取上证50成分股
-        rs = bs.query_sz50_stocks()
-        if rs.error_code != '0':
-            print(f'query_sz50_stocks error_code: {rs.error_code}')
-            print(f'query_sz50_stocks error_msg: {rs.error_msg}')
+        # 解析周期参数
+        period_years = parse_period(period)
+        # print(f'查询周期: {period_years}年')
+        
+        # 获取距离 end_date 最近的上一个交易日
+        last_trading_date = get_last_trading_date_before(end_date)
+        if last_trading_date is None:
+            print('无法获取上一个交易日')
             return None
         
-        # 获取结果集
-        sz50_stocks = []
-        while (rs.error_code == '0') & rs.next():
-            sz50_stocks.append(rs.get_row_data())
+        # print(f'结束日期: {end_date}，上一个交易日: {last_trading_date}')
         
-        if not sz50_stocks:
-            print('未获取到上证50成分股数据')
+        # 计算N年前的日期（使用年份减去，更准确）
+        last_date = datetime.strptime(last_trading_date, '%Y-%m-%d')
+        start_year = last_date.year - period_years
+        # 处理闰年2月29日的情况
+        try:
+            start_date = datetime(start_year, last_date.month, last_date.day).strftime('%Y-%m-%d')
+        except ValueError:
+            # 如果目标年份不是闰年且日期是2月29日，则使用2月28日
+            start_date = datetime(start_year, last_date.month, 28).strftime('%Y-%m-%d')
+        
+        # print(f'查询日期范围: {start_date} 至 {last_trading_date}')
+        
+        # 查询历史K线数据，只获取 date 和 peTTM 字段
+        rs = bs.query_history_k_data_plus(
+            stock_code,
+            "date,peTTM",  # 只获取日期和滚动市盈率
+            start_date=start_date,
+            end_date=last_trading_date,
+            frequency="d",  # 日线数据
+            adjustflag="3"  # 不复权
+        )
+        
+        if rs.error_code != '0':
+            print(f'query_history_k_data_plus respond error_code: {rs.error_code}')
+            print(f'query_history_k_data_plus respond error_msg: {rs.error_msg}')
+            return None
+        
+        # 处理结果集
+        data_list = []
+        while (rs.error_code == '0') & rs.next():
+            data_list.append(rs.get_row_data())
+        
+        if not data_list:
+            print('未获取到数据')
             return None
         
         # 转换为DataFrame
-        result = pd.DataFrame(sz50_stocks, columns=rs.fields)
-        print(f'成功获取 {len(result)} 只上证50成分股')
+        result = pd.DataFrame(data_list, columns=rs.fields)
+        
+        # 将 peTTM 转换为数值类型
+        result['peTTM'] = pd.to_numeric(result['peTTM'], errors='coerce')
+        
+        # 按日期排序
+        result = result.sort_values('date').reset_index(drop=True)
+        
+        # print(f'成功获取 {len(result)} 条 peTTM 数据')
         return result
         
     finally:
         baostock_logout(lg)
-
 
 def get_current_pettm_and_mean(stock_code, period="10Y", end_date=None):
     """
@@ -334,7 +211,7 @@ def get_current_pettm_and_mean(stock_code, period="10Y", end_date=None):
         sys.stdout = old_stdout
     
     if mean_pettm is None:
-        # print(f'{stock_code}: 计算peTTM均值失败')
+        print(f'{stock_code}: 计算peTTM均值失败')
         return None
     
     # get_pettm_mean 已经返回Python原生float类型，无需再次转换
@@ -346,385 +223,350 @@ def get_current_pettm_and_mean(stock_code, period="10Y", end_date=None):
         'mean_pettm': mean_pettm
     }
     
-    # print(f'{stock_code}: 最近交易日={last_trading_date}, peTTM={last_pettm:.4f}, 均值={mean_pettm:.4f}')
-    
     return result_dict
 
-
-def get_pettm_at_date_and_mean(stock_code, target_date, period_years=10):
+def get_last_trading_date_before(end_date):
     """
-    获取指定日期的peTTM，并计算以该日期为节点往前推N年的平均peTTM
-    
-    该函数会：
-    1. 获取目标日期最近交易日的peTTM
-    2. 计算从目标日期往前推N年的平均peTTM
+    获取指定日期之前最近的上一个交易日
     
     Args:
-        stock_code (str): 股票代码，格式如 "sh.601888" 或 "sz.000001"
-        target_date (str): 目标日期，格式为 YYYY-MM-DD
-        period_years (int): 往前推的年数，默认10年，可以是5或10
+        end_date (str): 日期字符串，格式为 YYYY-MM-DD
     
     Returns:
-        dict: 包含以下键的字典：
-            - target_date (str): 目标日期
-            - trading_date (str): 目标日期最近的实际交易日
-            - pettm_at_date (float): 目标日期（最近交易日）的peTTM
-            - mean_pettm (float): 往前推N年的平均peTTM
-            - period_years (int): 统计的年数
-            如果获取失败，返回 None
+        str: 上一个交易日的日期字符串，格式为 YYYY-MM-DD，如果出错返回 None
     """
-    # 登录系统（用于获取交易日）
-    lg = baostock_login()
-    if lg is None:
+    # 将字符串转换为日期对象
+    try:
+        end_date_obj = datetime.strptime(end_date, '%Y-%m-%d')
+    except ValueError:
+        print(f'日期格式错误: {end_date}，应为 YYYY-MM-DD 格式')
         return None
     
+    # 获取指定日期之前30天的交易日数据，确保能找到上一个交易日
+    start_date = (end_date_obj - timedelta(days=30)).strftime('%Y-%m-%d')
+    
+    lg = baostock_login()
+
+    rs = bs.query_trade_dates(start_date=start_date, end_date=end_date)
+    if rs.error_code != '0':
+        print(f'query_trade_dates respond error_code: {rs.error_code}')
+        print(f'query_trade_dates respond error_msg: {rs.error_msg}')
+        return None
+    
+    # 获取所有交易日
+    trading_dates = []
+    while (rs.error_code == '0') & rs.next():
+        row_data = rs.get_row_data()
+        if row_data[1] == '1':  # is_trading_day == '1' 表示是交易日
+            trading_date = row_data[0]  # calendar_date
+            # 只保留小于等于 end_date 的交易日
+            if trading_date <= end_date:
+                trading_dates.append(trading_date)
+    
+    if not trading_dates:
+        return None
+    
+    baostock_logout(lg)
+    # 返回最后一个交易日（即上一个交易日）
+    return sorted(trading_dates)[-1]
+
+def get_trading_date(start_date='2018-01-01', end_date=None):
+    """
+    获取指定日期范围内的交易日
+    Args:
+        start_date (str): 开始日期，格式为 YYYY-MM-DD
+        end_date (str): 结束日期，格式为 YYYY-MM-DD，如果为 None 则默认使用今天
+    Returns:
+        list: 交易日列表
+    """
+    if end_date is None:
+        end_date = datetime.now().strftime('%Y-%m-%d')
+
+    lg = baostock_login()
     try:
-        # 获取目标日期之前最近的上一个交易日
-        trading_date = get_last_trading_date_before(target_date)
-        if trading_date is None:
-            print(f'无法获取 {target_date} 之前的交易日')
+        # 查询交易日数据
+        rs = bs.query_trade_dates(start_date=start_date, end_date=end_date)
+        if rs.error_code != '0':
+            print(f'query_trade_dates respond error_code: {rs.error_code}')
+            print(f'query_trade_dates respond error_msg: {rs.error_msg}')
             return None
         
-        # 计算往前推N年的开始日期
-        trading_date_obj = datetime.strptime(trading_date, '%Y-%m-%d')
-        start_year = trading_date_obj.year - period_years
-        # 处理闰年2月29日的情况
-        try:
-            start_date = datetime(start_year, trading_date_obj.month, trading_date_obj.day).strftime('%Y-%m-%d')
-        except ValueError:
-            # 如果目标年份不是闰年且日期是2月29日，则使用2月28日
-            start_date = datetime(start_year, trading_date_obj.month, 28).strftime('%Y-%m-%d')
+        # 获取所有交易日
+        trading_dates = []
+        while (rs.error_code == '0') & rs.next():
+            row_data = rs.get_row_data()
+            if row_data[1] == '1':  # is_trading_day == '1' 表示是交易日
+                trading_date = row_data[0]  # calendar_date
+                # 只保留小于等于 end_date 的交易日
+                if trading_date <= end_date:
+                    trading_dates.append(trading_date)
         
-        print(f'目标日期: {target_date}，最近交易日: {trading_date}')
-        print(f'计算 {start_date} 至 {trading_date} 期间（{period_years}年）的平均peTTM')
+        return trading_dates
         
     finally:
         baostock_logout(lg)
-    
-    # 获取历史peTTM数据（get_history_pettm_data 内部会自己登录登出）
-    old_stdout = sys.stdout
-    sys.stdout = StringIO()
-    
+
+
+def get_history_pettm_data(stock_code, start_date='2000-01-01', end_date=None):
+    """
+    获取sotck的历史peTTM数据
+    """
+    lg = baostock_login()
     try:
-        result = get_history_pettm_data(stock_code, trading_date, period=f"{period_years}Y")
+        rs = bs.query_history_k_data_plus(
+                stock_code,
+                "date,code,peTTM,pbMRQ",  # 获取peTTM与pbMRQ
+                start_date=start_date,
+                end_date=end_date,
+                frequency="d",  # 日线数据
+                adjustflag="3"  # 不复权
+            )
+
+        if rs.error_code != '0':
+            print(f'query_history_k_data_plus respond error_code: {rs.error_code}')
+            print(f'query_history_k_data_plus respond error_msg: {rs.error_msg}')
+            return None
+        
+        # 处理结果集
+        data_list = []
+        while (rs.error_code == '0') & rs.next():
+            data_list.append(rs.get_row_data())
+        
+        if not data_list:
+            print('未获取到数据')
+            return None
+        
+        # 转换为DataFrame
+        result = pd.DataFrame(data_list, columns=rs.fields)
+        
+        # 将 peTTM、pbMRQ 转换为数值类型
+        result['peTTM'] = pd.to_numeric(result['peTTM'], errors='coerce')
+        result['pbMRQ'] = pd.to_numeric(result['pbMRQ'], errors='coerce')
+        
+        # 按日期排序
+        result = result.sort_values('date').reset_index(drop=True)
+        
+        return result
+    
     finally:
-        sys.stdout = old_stdout
-    
-    if result is None or result.empty:
-        print(f'获取 {stock_code} 的历史peTTM数据失败')
+        baostock_logout(lg)
+
+
+def get_pe_info(stock_code, target_date=None, period=["10Y", "5Y"]):
+    """
+    获取指定交易日的peTTM和以改天为节点往前推N年的平均peTTM
+    """
+    if target_date is None:
+        target_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+
+    last_trading_date = get_last_trading_date_before(target_date)
+    if last_trading_date is None:
         return None
     
-    # 确保按日期排序
-    result = result.sort_values('date').reset_index(drop=True)
+    pettm_df = get_history_pettm_data(stock_code, start_date='2010-01-01', end_date=last_trading_date)
+    if pettm_df is None:
+        return 
     
-    # 获取目标日期的peTTM（最近交易日的peTTM）
-    last_record = result.iloc[-1]
-    pettm_at_date = last_record['peTTM']
-    
-    # 将peTTM转换为数值类型
-    if pd.isna(pettm_at_date):
-        print(f'交易日 {trading_date} 的peTTM数据为空')
+    # 获取目标日期的peTTM、pbMRQ
+    target_date_mask = pettm_df['date'] == last_trading_date
+    if not target_date_mask.any():
+        print(f'目标日期 {last_trading_date} 不在数据中')
         return None
     
-    pettm_at_date = float(pettm_at_date)
+    pettm_at_date = pettm_df.loc[target_date_mask, 'peTTM'].values[0]
+    pbmrq_at_date = pettm_df.loc[target_date_mask, 'pbMRQ'].values[0]
     
-    # 计算往前推N年的平均peTTM（静默模式）
-    old_stdout = sys.stdout
-    sys.stdout = StringIO()
+    # 确保日期列是datetime类型
+    pettm_df['date'] = pd.to_datetime(pettm_df['date'])
+    target_date_obj = datetime.strptime(target_date, '%Y-%m-%d')
     
+    # 计算最近10年的开始日期（更准确的年份计算）
+    start_year_10y = target_date_obj.year - 10
     try:
-        mean_pettm = get_pettm_mean(result)
-    finally:
-        sys.stdout = old_stdout
+        start_date_10y = datetime(start_year_10y, target_date_obj.month, target_date_obj.day)
+    except ValueError:
+        # 处理闰年2月29日的情况
+        start_date_10y = datetime(start_year_10y, target_date_obj.month, 28)
     
-    if mean_pettm is None:
-        print(f'计算 {stock_code} 的平均peTTM失败')
-        return None
+    # 筛选最近10年的数据
+    pettm_10y = pettm_df[
+        (pettm_df['date'] >= start_date_10y) & 
+        (pettm_df['date'] <= target_date_obj)
+    ].copy()
+
+    # pettm_10y.to_csv(f"{stock_code.replace('.', '_')}_pettm_10y.csv", index=False, encoding="utf-8-sig")
+    # print(f"已将最近10年peTTM数据保存至 {stock_code.replace('.', '_')}_pettm_10y.csv")
     
-    # 返回结果
-    result_dict = {
+    # 过滤掉NaN值并计算均值
+    valid_pettm_10y = pettm_10y['peTTM'].dropna()
+    if valid_pettm_10y.empty:
+        mean_pettm_10y = None
+        print(f'最近10年没有有效的peTTM数据')
+    else:
+        mean_pettm_10y = float(valid_pettm_10y.mean())
+        # print(f'最近10年平均peTTM: {mean_pettm_10y:.4f} (基于 {len(valid_pettm_10y)} 条有效数据)')
+    
+    # 计算最近5年的开始日期（更准确的年份计算）
+    start_year_5y = target_date_obj.year - 5
+    try:
+        start_date_5y = datetime(start_year_5y, target_date_obj.month, target_date_obj.day)
+    except ValueError:
+        # 处理闰年2月29日的情况
+        start_date_5y = datetime(start_year_5y, target_date_obj.month, 28)
+    
+    # 筛选最近5年的数据
+    pettm_5y = pettm_df[
+        (pettm_df['date'] >= start_date_5y) & 
+        (pettm_df['date'] <= target_date_obj)
+    ].copy()
+    
+    # 过滤掉NaN值并计算均值
+    valid_pettm_5y = pettm_5y['peTTM'].dropna()
+    if valid_pettm_5y.empty:
+        mean_pettm_5y = None
+        print(f'最近5年没有有效的peTTM数据')
+    else:
+        mean_pettm_5y = float(valid_pettm_5y.mean())
+        # print(f'最近5年平均peTTM: {mean_pettm_5y:.4f} (基于 {len(valid_pettm_5y)} 条有效数据)')
+    
+    # pbMRQ统计
+    valid_pbmrq_10y = pettm_10y['pbMRQ'].dropna()
+    if valid_pbmrq_10y.empty:
+        mean_pbmrq_10y = None
+        print(f'最近10年没有有效的pbMRQ数据')
+    else:
+        mean_pbmrq_10y = float(valid_pbmrq_10y.mean())
+        # print(f'最近10年平均pbMRQ: {mean_pbmrq_10y:.4f} (基于 {len(valid_pbmrq_10y)} 条有效数据)')
+
+    valid_pbmrq_5y = pettm_5y['pbMRQ'].dropna()
+    if valid_pbmrq_5y.empty:
+        mean_pbmrq_5y = None
+        print(f'最近5年没有有效的pbMRQ数据')
+    else:
+        mean_pbmrq_5y = float(valid_pbmrq_5y.mean())
+        # print(f'最近5年平均pbMRQ: {mean_pbmrq_5y:.4f} (基于 {len(valid_pbmrq_5y)} 条有效数据)')
+
+    return {
+        'stock_code': stock_code,
         'target_date': target_date,
-        'trading_date': trading_date,
-        'pettm_at_date': pettm_at_date,
-        'mean_pettm': mean_pettm,
-        'period_years': period_years
+        'pettm_at_date': float(pettm_at_date),
+        'mean_pettm_10y': mean_pettm_10y,
+        'mean_pettm_5y': mean_pettm_5y,
+        'pbmrq_at_date': float(pbmrq_at_date),
+        'mean_pbmrq_10y': mean_pbmrq_10y,
+        'mean_pbmrq_5y': mean_pbmrq_5y
     }
-    
-    print(f'目标日期peTTM: {pettm_at_date:.4f}，平均peTTM（{period_years}年）: {mean_pettm:.4f}')
-    
-    return result_dict
 
 
-def analyze_sz50_stocks_pettm(period="10Y", end_date=None):
+def get_recent_predict_peTTM(stock_code):
     """
-    分析上证50成分股，找出最新peTTM小于平均peTTM的股票
-    
-    Args:
-        period: 时间跨度，可以是字符串如 "10Y" 或整数如 10，默认 "10Y"（10年）
-        end_date (str): 结束日期，格式为 YYYY-MM-DD，如果为 None 则默认使用今天
-    
-    Returns:
-        pandas.DataFrame: 包含以下列的DataFrame：
-            - code (str): 股票代码
-            - code_name (str): 股票名称
-            - last_pettm (float): 最新peTTM
-            - mean_pettm (float): 平均peTTM
-            - last_trading_date (str): 最近交易日
+    get recent predict peTTM from akshare
     """
-    print('='*60)
-    print('开始分析上证50成分股的peTTM...')
-    print('='*60)
+    report_df = ak.stock_research_report_em(symbol=stock_code)
+    # print(report_df.columns)
+    # print(report_df.head(15))
+    report_df = report_df[['股票代码', '股票简称', '2025-盈利预测-市盈率', '2026-盈利预测-市盈率', '2027-盈利预测-市盈率', '机构', '报告PDF链接', '日期']]
+    report_df.columns = ['stock_code', 'stock_name', 'predict_peTTM_2025', 'predict_peTTM_2026', 'predict_peTTM_2027', 'institution', 'report_pdf_link', 'date']
+    report_df = report_df.sort_values(by='date', ascending=False).reset_index(drop=True)
     
-    # 获取上证50股票列表
-    print('\n1. 获取上证50成分股列表...')
-    sz50_stocks = get_sz50_stocks()
-    if sz50_stocks is None or sz50_stocks.empty:
-        return None
-    
-    print(f'共获取 {len(sz50_stocks)} 只股票')
-    
-    # 存储结果
-    results = []
-    
-    print(f'\n2. 开始计算每只股票的peTTM...')
-    print(f'共需处理 {len(sz50_stocks)} 只股票\n')
-    
-    for idx, row in sz50_stocks.iterrows():
-        stock_code = row['code']
-        stock_name = row['code_name']
-        
-        print(f'[{idx+1}/{len(sz50_stocks)}] 处理股票: {stock_code} ({stock_name})')
-        
-        # 获取peTTM数据
-        pettm_data = get_current_pettm_and_mean(stock_code, period=period, end_date=end_date)
-        
-        if pettm_data is None:
-            print(f'  └─ 跳过: 无法获取peTTM数据\n')
+    # 根据日期对数据进行分组, 相隔超过30天的则为两个分组
+    dates_lst = report_df['date'].to_list()
+    idx = -1 
+    for i in range(len(dates_lst)):
+        if i == 0:
             continue
-        
-        last_pettm = pettm_data['last_pettm']
-        if last_pettm < 0:
-            print(f'  └─ ✗ 不符合: 最新peTTM={last_pettm:.4f} >= 平均peTTM={mean_pettm:.4f}\n')
-        mean_pettm = pettm_data['mean_pettm']
-        
-        # 判断最新peTTM是否小于平均peTTM
-        if last_pettm < mean_pettm:
-            results.append({
-                'code': stock_code,
-                'code_name': stock_name,
-                'last_pettm': last_pettm,
-                'mean_pettm': mean_pettm,
-                'last_trading_date': pettm_data['last_trading_date'],
-                'diff': mean_pettm - last_pettm,  # 差值
-                'diff_pct': (mean_pettm - last_pettm) / last_pettm * 100  # 差值百分比
-            })
-            print(f'  └─ ✓ 符合条件: 最新peTTM={last_pettm:.4f} < 平均peTTM={mean_pettm:.4f}\n')
-        else:
-            print(f'  └─ ✗ 不符合: 最新peTTM={last_pettm:.4f} >= 平均peTTM={mean_pettm:.4f}\n')
+        if (dates_lst[i-1] - dates_lst[i]).days > 30:
+            idx = i
+            break
     
-    # 转换为DataFrame
-    if not results:
-        print('\n未找到符合条件的股票')
+    report_df = report_df.iloc[:idx]
+    # 剔除掉predict_peTTM_2025~2027中有任一数据为空的行
+    report_df = report_df.dropna(subset=['predict_peTTM_2025', 'predict_peTTM_2026', 'predict_peTTM_2027']).reset_index(drop=True)
+    report_df['e_growth_rate'] = report_df.apply(lambda row: (row['predict_peTTM_2025'] / row['predict_peTTM_2027'])**0.5 - 1, axis=1)
+    
+    mean_e_growth_rate = report_df['e_growth_rate'].mean()
+
+    # 每条报告的关键信息按照 \001 拼接，每条之间用 \n 拼接
+    info_columns = [
+        'institution', 'date', 'predict_peTTM_2025', 'predict_peTTM_2026', 'predict_peTTM_2027', 'e_growth_rate', 'report_pdf_link'
+    ]
+    def row_to_str(row):
+        return '\t'.join([
+            str(row.get(col, "")) if row.get(col, "") is not None else "" for col in info_columns
+        ])
+    report_infos_str = '\n'.join([row_to_str(row) for _, row in report_df.iterrows()])
+
+    # 将最终结果保存到字典中
+    res = dict()
+    res['stock_code'] = stock_code
+    res['stock_name'] = report_df['stock_name'].iloc[0]
+    res['mean_e_growth_rate'] = mean_e_growth_rate
+    res['report_infos'] = report_infos_str
+    return res
+
+
+def get_merge_info(pe_info_dict, predict_g_dict):
+    """
+    合并两个字典
+    """
+    if not pe_info_dict or not predict_g_dict:
         return None
     
-    result_df = pd.DataFrame(results)
-    
-    # 按差值百分比排序（从大到小）
-    result_df = result_df.sort_values('diff_pct', ascending=False).reset_index(drop=True)
-    
-    print('='*60)
-    print(f'分析完成！共找到 {len(result_df)} 只符合条件的股票')
-    print('='*60)
-    
-    return result_df
+    pe_info_dict.pop('stock_code', None)
+
+    pe_info_dict.update(predict_g_dict)
+    return pe_info_dict
 
 
-def get_month_end_pettm_data(pettm_df):
+def add_stock_prefix(stock_code: str) -> str:
     """
-    从peTTM数据中提取每个月月末的数据，并确保最后一条数据是原始数据集的最后一条
-    
-    Args:
-        pettm_df (pandas.DataFrame): 包含 date 和 peTTM 列的 DataFrame
-    
-    Returns:
-        pandas.DataFrame: 包含每月月末 peTTM 数据的 DataFrame，最后一条是原始数据的最后一条
+    给6位数字的股票编码加地区前缀，上证用sh，深证用sz，创业板用sz，科创板用sh。
+    规则参考A股一般约定：
+        - 以60打头的为上证证券交易所（sh）
+        - 以00打头的为深证证券交易所（sz）
+        - 以30打头的为深证创业板（sz）
+        - 以68打头的为上证科创板（sh）
     """
-    if pettm_df is None or pettm_df.empty:
-        print('输入的peTTM数据为空')
+    stock_code = stock_code.strip()
+    if not (stock_code.isdigit() and len(stock_code) == 6):
+        raise ValueError(f"股票代码格式不正确: {stock_code}")
+
+    if stock_code.startswith("60") or stock_code.startswith("68"):
+        prefix = "sh"
+    elif stock_code.startswith("00") or stock_code.startswith("30"):
+        prefix = "sz"
+    else:
+        # 这里默认按sz
+        prefix = "sz"
+    return f"{prefix}.{stock_code}"
+
+
+
+def get_stock_info(stock_code, target_date=None):
+    if not stock_code:
         return None
     
-    # 复制数据，避免修改原始数据
-    df = pettm_df.copy()
+    if len(stock_code) != 6:
+        sim_stock_code = stock_code[-6:]
+    else:
+        sim_stock_code = stock_code
+        stock_code = add_stock_prefix(stock_code) 
+    pe_res = get_pe_info(stock_code, target_date) 
+    predict_g_res = get_recent_predict_peTTM(sim_stock_code)
+    merge_res = get_merge_info(pe_res, predict_g_res)
+    print(merge_res)
+    return merge_res
     
-    # 将date列转换为datetime类型
-    df['date'] = pd.to_datetime(df['date'])
-    
-    # 确保按日期排序
-    df = df.sort_values('date').reset_index(drop=True)
-    
-    # 获取原始数据的最后一条记录
-    last_record = df.iloc[-1:].copy()
-    last_date = last_record['date'].iloc[0]
-    last_date_str = last_record['date'].iloc[0].strftime('%Y-%m-%d')
-    
-    # 添加年月列，用于分组
-    df['year_month'] = df['date'].dt.to_period('M')
-    
-    # 获取最后一条数据之前的所有数据（不包括最后一条）
-    df_before_last = df[df['date'] < last_date].copy()
-    
-    # 如果只有一条数据，直接返回
-    if df_before_last.empty:
-        return last_record[['date', 'peTTM']]
-    
-    # 按年月分组，获取每组的最后一条记录（月末数据）
-    df_before_last_month_end = df_before_last.groupby('year_month').last().reset_index(drop=True)
-    
-    # 选择需要的列
-    month_end_data = df_before_last_month_end[['date', 'peTTM']].copy()
-    
-    # 将最后一条数据添加到结果中（确保最后一条数据是原始数据的最后一条）
-    result = pd.concat([month_end_data, last_record[['date', 'peTTM']]], ignore_index=True)
-    
-    # 去重（如果最后一条数据恰好是它所在月份的月末数据，可能会有重复）
-    # 保留最后一个（即原始数据的最后一条），确保最后一条数据一定是原始数据的最后一条
-    result = result.drop_duplicates(subset=['date'], keep='last')
-    
-    # 确保按日期排序
-    result = result.sort_values('date').reset_index(drop=True)
-    
-    print(f'提取了 {len(result)} 条月末数据（最后一条是原始数据的最后一条: {last_date_str}）')
-    return result
-
-
-def plot_pettm_line(pettm_df, stock_code, title=None, save_path=None):
-    """
-    绘制peTTM数据的折线图
-    
-    Args:
-        pettm_df (pandas.DataFrame): 包含 date 和 peTTM 列的 DataFrame
-        stock_code (str): 股票代码，用于标题和文件名
-        title (str): 图表标题，如果为None则自动生成
-        save_path (str): 保存路径，如果为None则不保存
-    
-    Returns:
-        None
-    """
-    if pettm_df is None or pettm_df.empty:
-        print('数据为空，无法绘图')
-        return
-    
-    # 复制数据，避免修改原始数据
-    df = pettm_df.copy()
-    
-    # 将date列转换为datetime类型
-    df['date'] = pd.to_datetime(df['date'])
-    
-    # 确保按日期排序
-    df = df.sort_values('date').reset_index(drop=True)
-    
-    # 过滤掉peTTM为空或NaN的数据
-    df = df.dropna(subset=['peTTM'])
-    
-    if df.empty:
-        print('没有有效的peTTM数据可以绘图')
-        return
-    
-    # 创建图表
-    plt.figure(figsize=(14, 8))
-    
-    # 绘制折线图
-    plt.plot(df['date'], df['peTTM'], marker='o', markersize=4, linewidth=1.5, label='peTTM')
-    
-    # 设置标题
-    if title is None:
-        title = f'{stock_code} 历史 peTTM 趋势图'
-    plt.title(title, fontsize=16, fontweight='bold')
-    
-    # 设置x轴标签
-    plt.xlabel('日期', fontsize=12)
-    
-    # 设置y轴标签
-    plt.ylabel('peTTM (滚动市盈率)', fontsize=12)
-    
-    # 添加网格
-    plt.grid(True, alpha=0.3, linestyle='--')
-    
-    # 旋转x轴标签，避免重叠
-    plt.xticks(rotation=45)
-    
-    # 添加图例
-    plt.legend(fontsize=10)
-    
-    # 调整布局，避免标签被裁剪
-    plt.tight_layout()
-    
-    # 保存图片
-    if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print(f'图表已保存到: {save_path}')
-    
-    # 显示图表
-    plt.show()
-
 
 def main():
-    """主函数，测试获取历史 peTTM 数据并绘制图表"""
-    # 测试获取历史 peTTM 数据
-    stock_code = STOCK_CODE
-    # # 使用当前日期作为结束日期
-    # end_date = datetime.now().strftime('%Y-%m-%d')
-    
-    # print(f'正在获取股票 {stock_code} 的历史 peTTM 数据...')
-    # print(f'结束日期: {end_date}')
-    # print(f'周期: 10Y\n')
-    
-    # # 获取历史peTTM数据
-    # result = get_history_pettm_data(stock_code, end_date, period="10Y")
-    # pettm_mean = get_pettm_mean(result)
-    # print(f'peTTM均值: {pettm_mean:.4f}')
+    stock_code = 'sh.601888'
+    get_stock_info(stock_code)
 
-    # if result is not None:
-    #     print('\n前5条数据:')
-    #     print(result.head())
-    #     print('\n后5条数据:')
-    #     print(result.tail())
-    #     print(f'\n数据统计:')
-    #     print(result.describe())
-        
-        
-    #     # 提取每月月末数据
-    #     print('\n' + '='*50)
-    #     print('提取每月月末数据...')
-    #     month_end_data = get_month_end_pettm_data(result)
-        
-    #     if month_end_data is not None:
-    #         print('\n月末数据前5条:')
-    #         print(month_end_data.head())
-    #         print('\n月末数据后5条:')
-    #         print(month_end_data.tail())
-            
-    #         # 绘制折线图
-    #         print('\n' + '='*50)
-    #         print('绘制折线图...')
-    #         plot_pettm_line(month_end_data, stock_code, 
-    #                       title=f'{stock_code} 历史 peTTM 月末数据趋势图',
-    #                       save_path=None)
-    #     else:
-    #         print('提取月末数据失败')
-    # else:
-    #     print('获取数据失败') 
-
-    # 分析上证50成分股，找出最新peTTM小于平均peTTM的股票
-    result_df = analyze_sz50_stocks_pettm(period="10Y", end_date=None)
-    
-    if result_df is not None:
-        print('\n符合条件的stock列表:')
-        print('='*60)
-        print(result_df[['code', 'code_name', 'last_pettm', 'mean_pettm', 'diff_pct']].to_string(index=False))
-        print('='*60)
-    else:
-        print('分析失败或未找到符合条件的stock')
+def test():
+    res = get_recent_predict_peTTM("601888")
+    print(res)
 
 if __name__ == "__main__":
     main()
+    # test()
+    

@@ -1,14 +1,20 @@
 from pathlib import Path
 from datetime import datetime
-
+from os import path as osp  
 import pandas as pd
 
-from zhongmian_analysis import get_pe_info
+from stock_analysis import get_stock_info
 
 
-def load_all_codes(csv_path: Path):
-    """读取csv中的股票代码列表."""
-    if not csv_path.exists():
+ROOT_DIR = Path(__file__).resolve().parents[2]
+DATA_DIR = osp.join(ROOT_DIR, "data")
+STOCK_LIST_FILE = osp.join(DATA_DIR, "sz50_stocks_test.csv")
+OUTPUT_DIR = osp.join(DATA_DIR, "stock_analysis_results")
+
+
+def load_all_codes(csv_path: str):
+    """读取csv中的股票代码列表"""
+    if not osp.exists(csv_path):
         raise FileNotFoundError(f"找不到文件: {csv_path}")
 
     try:
@@ -33,84 +39,117 @@ def load_all_codes(csv_path: Path):
     return records.to_dict("records")
 
 
-def save_results(result_rows, output_dir: Path, file_name: str):
+def post_process_results(result_rows):
+    """
+    对原始数据进行后处理
+    """
+    res_df = pd.DataFrame(result_rows)
+    # PEG = pettm_at_date / mean_e_growth_rate
+    res_df['PEG'] = res_df.apply(lambda row: row['pettm_at_date'] / (row['mean_e_growth_rate'] * 100), axis=1)
+    # 5年均值回归的收益率
+    res_df['predict_revenue_5y'] = res_df.apply(lambda row: (row['mean_pettm_5y'] / row['pettm_at_date']) ** (1/2) * (1 + row['mean_e_growth_rate']) - 1, axis=1)
+    # 10年均值回归的收益率
+    res_df['predict_revenue_10y'] = res_df.apply(lambda row: (row['mean_pettm_10y'] / row['pettm_at_date']) ** (1/2) * (1 + row['mean_e_growth_rate']) - 1, axis=1)
+
+    res_df.columns = [
+        "target_date",
+        "stock_code",
+        "stock_name",
+        "mean_pettm_5y",
+        "mean_pettm_10y",
+        "pettm_at_date",
+        "mean_e_growth_rate",
+        "PEG",
+        "predict_revenue_5y",
+        "predict_revenue_10y",
+        "pbmrq_at_date",
+        "mean_pbmrq_10y",
+        "mean_pbmrq_5y",
+        "report_infos"
+    ]
+
+
+    
+
+
+def save_results(result_rows, output_dir: str, file_name: str):
     """将结果保存到CSV，优先使用utf-8-sig，失败时回退到gbk."""
     if not result_rows:
         print("没有可保存的结果")
         return
 
-    output_dir.mkdir(parents=True, exist_ok=True)
+    osp.makedirs(output_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_path = output_dir / f"{file_name}_{timestamp}.csv"
+    output_path = osp.join(output_dir, f"{file_name}_{timestamp}.csv")
 
     result_df = pd.DataFrame(result_rows)
     try:
         result_df.to_csv(output_path, index=False, encoding="utf-8-sig")
         print(f"结果已保存至 {output_path} (utf-8-sig)")
     except UnicodeEncodeError:
-        fallback_path = output_path.with_suffix(".gbk.csv")
+        fallback_path = osp.join(output_dir, f"{file_name}_{timestamp}.gbk.csv")
         result_df.to_csv(fallback_path, index=False, encoding="gbk")
         print(f"utf-8 编码失败，改用 GBK 保存至 {fallback_path}")
 
 
-def main():
-    project_root = Path(__file__).resolve().parents[2]
-    # input_file_name = "sz50_stocks.csv"
-    input_file_name = "hs300_stocks.csv"
-    output_file_name = input_file_name.replace(".csv", "")
-    csv_path = project_root / "data" / input_file_name
-
+def process_stocks(csv_path: str = STOCK_LIST_FILE, output_dir: str = OUTPUT_DIR, file_name: str = "stock_analysis"):
+    """
+    批量处理股票列表，调用get_stock_info获取信息并保存到CSV
+    
+    Args:
+        csv_path: 股票列表CSV文件路径，默认为STOCK_LIST_FILE
+        output_dir: 输出目录，默认为OUTPUT_DIR
+        file_name: 输出文件名前缀，默认为"stock_analysis"
+    """
+    # 加载股票列表
+    print(f"正在加载股票列表: {csv_path}")
     try:
-        stock_infos = load_all_codes(csv_path)
-    except (FileNotFoundError, ValueError) as exc:
-        print(f"加载股票列表失败: {exc}")
+        stock_list = load_all_codes(csv_path)
+        print(f"成功加载 {len(stock_list)} 只股票")
+    except Exception as e:
+        print(f"加载股票列表失败: {e}")
         return
-
-    if not stock_infos:
-        print("未在列表中找到任何股票代码")
-        return
-
-    results = []
-    for info in stock_infos:
-        code = info["code"]
-        code_name = info.get("code_name", "")
+    
+    # 处理每只股票
+    result_rows = []
+    total = len(stock_list)
+    
+    for idx, stock_record in enumerate(stock_list, 1):
+        stock_code = stock_record.get("code", "")
+        stock_name = stock_record.get("code_name", "")
+        
+        print(f"[{idx}/{total}] 正在处理: {stock_code} {stock_name}")
+        
         try:
-            pe_info = get_pe_info(code)
-        except Exception as exc:  # noqa: BLE001
-            print(f"[{code} {code_name}] 获取PE信息失败: {exc}")
+            # 调用get_stock_info获取股票信息
+            stock_info = get_stock_info(stock_code)
+            
+            if stock_info is None:
+                print(f"  ⚠️  {stock_code} {stock_name}: 获取信息失败，跳过")
+                continue
+            
+            # 添加股票代码和名称到结果中
+            stock_info["code"] = stock_code
+            stock_info["code_name"] = stock_name
+            
+            result_rows.append(stock_info)
+            print(f"  ✅ {stock_code} {stock_name}: 处理成功")
+            
+        except Exception as e:
+            print(f"  ❌ {stock_code} {stock_name}: 处理出错 - {e}")
             continue
-
-        if pe_info is None:
-            print(f"[{code} {code_name}] 无法获取PE信息")
-            continue
-
-        print(f"[{code} {code_name}] target_date={pe_info['target_date']}, "
-              f"peTTM={pe_info['pettm_at_date']}, "
-              f"mean_peTTM_10Y={pe_info['mean_pettm_10y']}, "
-              f"mean_peTTM_5Y={pe_info['mean_pettm_5y']}, "
-              f"pbMRQ={pe_info['pbmrq_at_date']}, "
-              f"mean_pbMRQ_10Y={pe_info['mean_pbmrq_10y']}, "
-              f"mean_pbMRQ_5Y={pe_info['mean_pbmrq_5y']}")
-
-        results.append(
-            {
-                "date": pe_info["target_date"],
-                "code": code,
-                "code_name": code_name,
-                "peTTM": pe_info["pettm_at_date"],
-                "mean_peTTM_5Y": pe_info["mean_pettm_5y"],
-                "mean_peTTM_10Y": pe_info["mean_pettm_10y"],
-                "pbMRQ": pe_info["pbmrq_at_date"],
-                "mean_pbMRQ_5Y": pe_info["mean_pbmrq_5y"],
-                "mean_pbMRQ_10Y": pe_info["mean_pbmrq_10y"],
-            }
-        )
-
-    if results:
-        output_dir = project_root / "data" / "pe_info"
-        save_results(results, output_dir, output_file_name)
+    
+    # 保存结果
+    print(f"\n处理完成，成功处理 {len(result_rows)}/{total} 只股票")
+    if result_rows:
+        save_results(result_rows, output_dir, file_name)
     else:
-        print("未获取到任何有效的PE结果，跳过保存。")
+        print("没有成功处理任何股票，不保存结果")
+
+
+def main():
+    """主函数"""
+    process_stocks()
 
 
 if __name__ == "__main__":

@@ -157,7 +157,7 @@ stream = client.chat.completions.create(
                         "url": "https://ark-project.tos-cn-beijing.ivolces.com/images/view.jpeg"
                     },
                 },
-                {"type": "text", "text": "这是哪里？"},
+                {"type": "text", "text": "你现在在哪里？"},
             ],
         }
     ],
@@ -174,8 +174,9 @@ with stream:
             reasoning_content += chunk.choices[0].delta.reasoning_content
             print(chunk.choices[0].delta.reasoning_content, end="")
 
-        delta_content = chunk.choices[0].delta.content
-        if delta_content is not None:
-            content += delta_content
-            print(delta_content, end="")
+        if hasattr(chunk.choices[0].delta, 'content'):
+            delta_content = chunk.choices[0].delta.content
+            if delta_content is not None:
+                content += delta_content
+                print(delta_content, end="")
 elapsed = time.perf_counter() - start_ts

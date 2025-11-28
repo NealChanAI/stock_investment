@@ -6,10 +6,10 @@ import os
 
 from stock_analysis import get_stock_info
 
-
+STOCK_FILE_NAME = "sz50_stocks.csv"    
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = osp.join(ROOT_DIR, "data")
-STOCK_LIST_FILE = osp.join(DATA_DIR, "sz50_stocks_test.csv")
+STOCK_LIST_FILE = osp.join(DATA_DIR, STOCK_FILE_NAME)
 OUTPUT_DIR = osp.join(DATA_DIR, "stock_analysis_results")
 
 

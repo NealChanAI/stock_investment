@@ -6,7 +6,8 @@ import os
 
 from stock_analysis import get_stock_info
 
-STOCK_FILE_NAME = "sz50_stocks.csv"    
+# STOCK_FILE_NAME = "sz50_stocks.csv"
+STOCK_FILE_NAME = "hs300_stocks.csv" 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = osp.join(ROOT_DIR, "data")
 STOCK_LIST_FILE = osp.join(DATA_DIR, STOCK_FILE_NAME)
@@ -39,6 +40,32 @@ def load_all_codes(csv_path: str):
     )
     return records.to_dict("records")
 
+def _calc_revenue(row, mean_pe_col):
+    pe_now = row['pettm_at_date']
+    pe_mean = row[mean_pe_col]
+    growth = row['mean_e_growth_rate']
+    
+    # 1. 数据清洗：确保是数字
+    try:
+        pe_now = float(pe_now)
+        pe_mean = float(pe_mean)
+    except (ValueError, TypeError):
+        return None
+
+    # 2. 核心逻辑：处理负值和零
+    # 如果最新市盈率或历史均值市盈率为负，均值回归模型失效
+    if pe_now <= 0 or pe_mean <= 0:
+        return -10
+        
+    # 3. 计算比率
+    ratio = pe_mean / pe_now
+    
+    # 4. 计算收益率 (避免负数开根号)
+    try:
+        val = (ratio ** 0.5) * (1 + growth) - 1
+        return val
+    except Exception:
+        return -10
 
 def post_process_results(result_rows):
     """
@@ -46,17 +73,31 @@ def post_process_results(result_rows):
     """
     res_df = pd.DataFrame(result_rows)
     # PEG = pettm_at_date / mean_e_growth_rate
-    res_df['PEG'] = res_df.apply(lambda row: row['pettm_at_date'] / (row['mean_e_growth_rate'] * 100), axis=1)
+    res_df['PEG'] = res_df.apply(lambda row: row['pettm_at_date'] / (row['mean_e_growth_rate'] * 100) if row['mean_e_growth_rate'] > 0 else -10, axis=1)
+    res_df['PEG'] = res_df['PEG'].map(lambda x: f"{x:.1f}")
     # 5年均值回归的收益率
-    res_df['predict_revenue_5y'] = res_df.apply(lambda row: (row['mean_pettm_5y'] / row['pettm_at_date']) ** (1/2) * (1 + row['mean_e_growth_rate']) - 1, axis=1)
+    res_df['predict_revenue_5y'] = res_df.apply(lambda row: _calc_revenue(row, 'mean_pettm_5y'), axis=1)
+    print(f"predict_revenue_5y: {res_df['predict_revenue_5y'].to_list()}")
     # 10年均值回归的收益率
-    res_df['predict_revenue_10y'] = res_df.apply(lambda row: (row['mean_pettm_10y'] / row['pettm_at_date']) ** (1/2) * (1 + row['mean_e_growth_rate']) - 1, axis=1)
+    res_df['predict_revenue_10y'] = res_df.apply(lambda row: _calc_revenue(row, 'mean_pettm_10y'), axis=1)
     # 每股净利润增长率格式化
     res_df['mean_e_growth_rate'] = (res_df['mean_e_growth_rate'] * 100).map(lambda x: f"{x:.2f}%")
     # 5年均值回归的收益率格式化
     res_df['predict_revenue_5y'] = (res_df['predict_revenue_5y'] * 100).map(lambda x: f"{x:.2f}%")
     # 10年均值回归的收益率
     res_df['predict_revenue_10y'] = (res_df['predict_revenue_10y'] * 100).map(lambda x: f"{x:.2f}%")
+    # 5年均值回归的市盈率格式化
+    res_df['mean_pettm_5y'] = res_df['mean_pettm_5y'].map(lambda x: f"{x:.1f}")
+    # 10年均值回归的市盈率格式化
+    res_df['mean_pettm_10y'] = res_df['mean_pettm_10y'].map(lambda x: f"{x:.1f}")
+    # 最新市盈率格式化
+    res_df['pettm_at_date'] = res_df['pettm_at_date'].map(lambda x: f"{x:.1f}")
+    # 市净率格式化
+    res_df['pbmrq_at_date'] = res_df['pbmrq_at_date'].map(lambda x: f"{x:.2f}")
+    # 5年市净率格式化
+    res_df['mean_pbmrq_5y'] = res_df['mean_pbmrq_5y'].map(lambda x: f"{x:.2f}")
+    # 10年市净率格式化
+    res_df['mean_pbmrq_10y'] = res_df['mean_pbmrq_10y'].map(lambda x: f"{x:.2f}")
 
     cols = [
         "target_date",

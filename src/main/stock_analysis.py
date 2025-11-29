@@ -482,16 +482,54 @@ def get_recent_predict_peTTM(stock_code):
     report_df = report_df.iloc[:idx]
     # 剔除掉predict_peTTM_2025~2027中有任一数据为空的行
     report_df = report_df.dropna(subset=['predict_peTTM_2025', 'predict_peTTM_2026', 'predict_peTTM_2027']).reset_index(drop=True)
-    report_df['e_growth_rate'] = report_df.apply(lambda row: (row['predict_peTTM_2025'] / row['predict_peTTM_2027'])**0.5 - 1, axis=1)
     
-    mean_e_growth_rate = report_df['e_growth_rate'].mean()
+    def calculate_e_growth_rate(row):
+        """计算每股净利润增长率，只有当两个预测市盈率都是正数时才进行开平方"""
+        pe2025 = row['predict_peTTM_2025']
+        pe2027 = row['predict_peTTM_2027']
+        
+        # 检查是否为复数或负数
+        if isinstance(pe2025, complex) or isinstance(pe2027, complex):
+            return float('nan')
+        
+        # 转换为浮点数并检查是否为正数
+        try:
+            pe2025_val = float(pe2025)
+            pe2027_val = float(pe2027)
+        except (ValueError, TypeError):
+            return float('nan')
+        
+        # 只有当两个值都是正数时才进行开平方
+        if pe2025_val > 0 and pe2027_val > 0:
+            ratio = pe2025_val / pe2027_val
+            # ratio 一定大于 0，因为两个除数都是正数
+            result = (ratio ** 0.5) - 1
+            # 确保结果是实数
+            if isinstance(result, complex):
+                return result.real
+            return float(result)
+        else:
+            return float('nan')
+    
+    report_df['e_growth_rate'] = report_df.apply(calculate_e_growth_rate, axis=1)
+    
+    # 计算均值，跳过 NaN 值，并确保结果是实数
+    valid_growth_rates = report_df['e_growth_rate'].dropna()
+    if valid_growth_rates.empty:
+        mean_e_growth_rate = float('nan')
+    else:
+        mean_e_growth_rate = valid_growth_rates.mean()
+        # 确保是实数类型
+        if isinstance(mean_e_growth_rate, complex):
+            mean_e_growth_rate = mean_e_growth_rate.real
+        mean_e_growth_rate = float(mean_e_growth_rate)
 
     # 每条报告的关键信息按照 \001 拼接，每条之间用 \n 拼接
     info_columns = [
         'institution', 'date', 'predict_peTTM_2025', 'predict_peTTM_2026', 'predict_peTTM_2027', 'e_growth_rate', 'report_pdf_link'
     ]
     def row_to_str(row):
-        return '\t'.join([
+        return '  '.join([
             str(row.get(col, "")) if row.get(col, "") is not None else "" for col in info_columns
         ])
     report_infos_str = '\n'.join([row_to_str(row) for _, row in report_df.iterrows()])

@@ -4,10 +4,10 @@ import requests
 
 
 def _main():
-    stock_research_report_em_df = ak.stock_research_report_em(symbol="600436")
+    stock_research_report_em_df = ak.stock_research_report_em(symbol="601888")
     print(stock_research_report_em_df.columns)
     print(stock_research_report_em_df.head(2))
-    print(stock_research_report_em_df[['2025-盈利预测-市盈率', '2026-盈利预测-市盈率', '2027-盈利预测-市盈率']])
+    print(stock_research_report_em_df[['行业']])
 
 
 def main():

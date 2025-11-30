@@ -6,8 +6,8 @@ import os
 
 from stock_analysis import get_stock_info
 
-# STOCK_FILE_NAME = "sz50_stocks.csv"
-STOCK_FILE_NAME = "hs300_stocks.csv" 
+STOCK_FILE_NAME = "sz50_stocks.csv"
+# STOCK_FILE_NAME = "hs300_stocks.csv" 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = osp.join(ROOT_DIR, "data")
 STOCK_LIST_FILE = osp.join(DATA_DIR, STOCK_FILE_NAME)
@@ -98,6 +98,8 @@ def post_process_results(result_rows):
     res_df['mean_pbmrq_5y'] = res_df['mean_pbmrq_5y'].map(lambda x: f"{x:.2f}")
     # 10年市净率格式化
     res_df['mean_pbmrq_10y'] = res_df['mean_pbmrq_10y'].map(lambda x: f"{x:.2f}")
+    # stock_code格式化
+    res_df['stock_code'] = res_df['stock_code'].map(lambda x: str(x))
 
     cols = [
         "target_date",

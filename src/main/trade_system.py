@@ -6,8 +6,8 @@ import os
 
 from stock_analysis import get_stock_info
 
-STOCK_FILE_NAME = "sz50_stocks.csv"
-# STOCK_FILE_NAME = "hs300_stocks.csv" 
+# STOCK_FILE_NAME = "sz50_stocks.csv"
+STOCK_FILE_NAME = "hs300_stocks.csv" 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = osp.join(ROOT_DIR, "data")
 STOCK_LIST_FILE = osp.join(DATA_DIR, STOCK_FILE_NAME)
@@ -142,17 +142,18 @@ def post_process_results(result_rows):
 
 
 def save_results(res_df, output_dir: str, file_name: str):
-    """将结果保存到CSV"""
+    """将结果保存到 Excel 文件"""
     if res_df is None:
         print("没有可保存的结果")
         return
 
     os.makedirs(output_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_path = osp.join(output_dir, f"{file_name}_{timestamp}.csv")
+    output_path = osp.join(output_dir, f"{file_name}_{timestamp}.xlsx")
 
-    res_df.to_csv(output_path, index=False, encoding="utf-8")
-    print(f"结果已保存至 {output_path}")
+    # 保存为 Excel，禁用索引
+    res_df.to_excel(output_path, index=False)
+    print(f"结果已保存至 {output_path} (Excel)")
 
 
 

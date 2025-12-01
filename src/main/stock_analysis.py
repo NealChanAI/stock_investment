@@ -549,11 +549,15 @@ def get_merge_info(pe_info_dict, predict_g_dict):
     """
     if not pe_info_dict or not predict_g_dict:
         return None
-    
-    pe_info_dict.pop('stock_code', None)
 
-    pe_info_dict.update(predict_g_dict)
-    return pe_info_dict
+    # 保留 pe_info_dict 中带交易所前缀的 stock_code（如 sh.601888），
+    # 仅合并预测数据中的其它字段，避免覆盖前缀
+    merged = dict(pe_info_dict)
+    predict_part = dict(predict_g_dict)
+    predict_part.pop('stock_code', None)
+
+    merged.update(predict_part)
+    return merged
 
 
 def add_stock_prefix(stock_code: str) -> str:

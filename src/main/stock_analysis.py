@@ -463,8 +463,6 @@ def get_recent_predict_peTTM(stock_code):
     get recent predict peTTM from akshare
     """
     report_df = ak.stock_research_report_em(symbol=stock_code)
-    # print(report_df.columns)
-    # print(report_df.head(15))
     report_df = report_df[['股票代码', '股票简称', '2025-盈利预测-市盈率', '2026-盈利预测-市盈率', '2027-盈利预测-市盈率', '机构', '报告PDF链接', '日期']]
     report_df.columns = ['stock_code', 'stock_name', 'predict_peTTM_2025', 'predict_peTTM_2026', 'predict_peTTM_2027', 'institution', 'report_pdf_link', 'date']
     report_df = report_df.sort_values(by='date', ascending=False).reset_index(drop=True)
@@ -534,12 +532,25 @@ def get_recent_predict_peTTM(stock_code):
         ])
     report_infos_str = '\n'.join([row_to_str(row) for _, row in report_df.iterrows()])
 
+    # 获取股票所属行业信息
+    industry = ""
+    try:
+        stock_detail = ak.stock_individual_info_em(symbol=stock_code)
+        # 从 item/value 结构中提取“行业”
+        industry_series = stock_detail.loc[stock_detail["item"] == "行业", "value"]
+        if not industry_series.empty:
+            industry = str(industry_series.iloc[0])
+    except Exception:
+        # 行业获取失败时保持为空字符串，避免中断主流程
+        industry = ""
+
     # 将最终结果保存到字典中
     res = dict()
     res['stock_code'] = stock_code
     res['stock_name'] = report_df['stock_name'].iloc[0]
     res['mean_e_growth_rate'] = mean_e_growth_rate
     res['report_infos'] = report_infos_str
+    res['industry'] = industry
     return res
 
 

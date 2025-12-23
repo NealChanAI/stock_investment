@@ -38,7 +38,11 @@ while (rs.error_code == '0') & rs.next():
     industry_list.append(rs.get_row_data())
 result = pd.DataFrame(industry_list, columns=rs.fields)
 # Output result set to csv file
-result.to_csv("data/industry_data/industry_data.csv", encoding="gbk", index=False)
+import os
+# 确保项目根目录下的data目录存在
+data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'data')
+os.makedirs(data_dir, exist_ok=True)
+result.to_csv(os.path.join(data_dir, "industry_data.csv"), encoding="utf-8", index=False)
 print(result)
 
 # Logout from the system

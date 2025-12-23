@@ -1,6 +1,5 @@
 import baostock as bs
 
-import baostock as bs
 import pandas as pd
 
 # 登陆系统

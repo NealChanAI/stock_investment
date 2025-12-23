@@ -149,8 +149,9 @@ def post_process_results(result_rows):
 
     cols = [
         "target_date",
-        "stock_code",
+        "stock_code", 
         "stock_name",
+        "industry",
         "mean_pettm_5y",
         "mean_pettm_10y",
         "pettm_at_date",
@@ -170,6 +171,7 @@ def post_process_results(result_rows):
         "日期",
         "股票代码",
         "股票名称",
+        "所属行业",
         "5年均值回归的市盈率",
         "10年均值回归的市盈率",
         "最新市盈率",

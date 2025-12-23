@@ -138,12 +138,72 @@ def post_process_results(result_rows):
     # 5 年 / 10 年均值回归的 PE：保留 1 位小数
     res_df['mean_pettm_5y'] = res_df['mean_pettm_5y'].round(1)
     res_df['mean_pettm_10y'] = res_df['mean_pettm_10y'].round(1)
+    # 5 年 / 10 年内（不含当前最近交易日）的历史最低 PE：保留 1 位小数
+    if 'min_pettm_5y_excl_current' in res_df.columns:
+        res_df['min_pettm_5y_excl_current'] = pd.to_numeric(
+            res_df['min_pettm_5y_excl_current'], errors='coerce'
+        ).round(1)
+    if 'min_pettm_10y_excl_current' in res_df.columns:
+        res_df['min_pettm_10y_excl_current'] = pd.to_numeric(
+            res_df['min_pettm_10y_excl_current'], errors='coerce'
+        ).round(1)
+    # 5 年 / 10 年内（不含当前最近交易日）的历史最低 PB：保留 2 位小数
+    if 'min_pbmrq_5y_excl_current' in res_df.columns:
+        res_df['min_pbmrq_5y_excl_current'] = pd.to_numeric(
+            res_df['min_pbmrq_5y_excl_current'], errors='coerce'
+        ).round(2)
+    if 'min_pbmrq_10y_excl_current' in res_df.columns:
+        res_df['min_pbmrq_10y_excl_current'] = pd.to_numeric(
+            res_df['min_pbmrq_10y_excl_current'], errors='coerce'
+        ).round(2)
     # 最新 PE：保留 1 位小数
     res_df['pettm_at_date'] = res_df['pettm_at_date'].round(1)
     # PB：保留 2 位小数
     res_df['pbmrq_at_date'] = res_df['pbmrq_at_date'].round(2)
     res_df['mean_pbmrq_5y'] = res_df['mean_pbmrq_5y'].round(2)
     res_df['mean_pbmrq_10y'] = res_df['mean_pbmrq_10y'].round(2)
+
+    # ---- 5/10 年 PE/PB 谷底 ±15% 区间与是否落在区间 ----
+    # 统一确保参与计算的列为数值
+    for col in [
+        'min_pettm_5y_excl_current', 'min_pettm_10y_excl_current',
+        'min_pbmrq_5y_excl_current', 'min_pbmrq_10y_excl_current',
+        'pettm_at_date', 'pbmrq_at_date'
+    ]:
+        if col in res_df.columns:
+            res_df[col] = pd.to_numeric(res_df[col], errors='coerce')
+
+    # 5年 PE 谷底 ±15%
+    res_df['pe_5y_trough_low_15'] = (res_df['min_pettm_5y_excl_current'] * 0.85).round(1)
+    res_df['pe_5y_trough_high_15'] = (res_df['min_pettm_5y_excl_current'] * 1.15).round(1)
+    res_df['pe_5y_in_trough_15'] = (
+        (res_df['pettm_at_date'] >= res_df['pe_5y_trough_low_15']) &
+        (res_df['pettm_at_date'] <= res_df['pe_5y_trough_high_15'])
+    ).astype(int)
+
+    # 10年 PE 谷底 ±15%
+    res_df['pe_10y_trough_low_15'] = (res_df['min_pettm_10y_excl_current'] * 0.85).round(1)
+    res_df['pe_10y_trough_high_15'] = (res_df['min_pettm_10y_excl_current'] * 1.15).round(1)
+    res_df['pe_10y_in_trough_15'] = (
+        (res_df['pettm_at_date'] >= res_df['pe_10y_trough_low_15']) &
+        (res_df['pettm_at_date'] <= res_df['pe_10y_trough_high_15'])
+    ).astype(int)
+
+    # 5年 PB 谷底 ±15%
+    res_df['pb_5y_trough_low_15'] = (res_df['min_pbmrq_5y_excl_current'] * 0.85).round(2)
+    res_df['pb_5y_trough_high_15'] = (res_df['min_pbmrq_5y_excl_current'] * 1.15).round(2)
+    res_df['pb_5y_in_trough_15'] = (
+        (res_df['pbmrq_at_date'] >= res_df['pb_5y_trough_low_15']) &
+        (res_df['pbmrq_at_date'] <= res_df['pb_5y_trough_high_15'])
+    ).astype(int)
+
+    # 10年 PB 谷底 ±15%
+    res_df['pb_10y_trough_low_15'] = (res_df['min_pbmrq_10y_excl_current'] * 0.85).round(2)
+    res_df['pb_10y_trough_high_15'] = (res_df['min_pbmrq_10y_excl_current'] * 1.15).round(2)
+    res_df['pb_10y_in_trough_15'] = (
+        (res_df['pbmrq_at_date'] >= res_df['pb_10y_trough_low_15']) &
+        (res_df['pbmrq_at_date'] <= res_df['pb_10y_trough_high_15'])
+    ).astype(int)
     # stock_code格式化
     res_df['stock_code'] = res_df['stock_code'].map(lambda x: str(x))
 
@@ -154,7 +214,23 @@ def post_process_results(result_rows):
         "industry",
         "mean_pettm_5y",
         "mean_pettm_10y",
+        "min_pettm_5y_excl_current",
+        "min_pettm_10y_excl_current",
+        "min_pbmrq_5y_excl_current",
+        "min_pbmrq_10y_excl_current",
         "pettm_at_date",
+        "pe_5y_trough_low_15",
+        "pe_5y_trough_high_15",
+        "pe_5y_in_trough_15",
+        "pe_10y_trough_low_15",
+        "pe_10y_trough_high_15",
+        "pe_10y_in_trough_15",
+        "pb_5y_trough_low_15",
+        "pb_5y_trough_high_15",
+        "pb_5y_in_trough_15",
+        "pb_10y_trough_low_15",
+        "pb_10y_trough_high_15",
+        "pb_10y_in_trough_15",
         "mean_e_growth_rate",
         "PEG",
         "predict_revenue_5y",
@@ -168,23 +244,39 @@ def post_process_results(result_rows):
     ]
 
     cols_zh = [
-        "日期",
-        "股票代码",
-        "股票名称",
-        "所属行业",
-        "5年均值回归的市盈率",
-        "10年均值回归的市盈率",
-        "最新市盈率",
-        "预估每股净利润增长率(%)",
-        "PEG",
-        "5年均值PE回归的收益率(%)",
-        "10年均值PE回归的收益率(%)",
-        "最新市净率",
-        "5年均值回归的市净率",
-        "10年均值回归的市净率",
-        "5年均值PB回归的涨幅(%)",
-        "10年均值PB回归的涨幅(%)",
-        "报告信息"
+        "日期",                             # target_date
+        "股票代码",                         # stock_code
+        "股票名称",                         # stock_name
+        "所属行业",                         # industry
+        "5年均值回归的市盈率",               # mean_pettm_5y
+        "10年均值回归的市盈率",              # mean_pettm_10y
+        "5年内(不含当前)最低市盈率",          # min_pettm_5y_excl_current
+        "10年内(不含当前)最低市盈率",         # min_pettm_10y_excl_current
+        "5年内(不含当前)最低市净率",          # min_pbmrq_5y_excl_current
+        "10年内(不含当前)最低市净率",         # min_pbmrq_10y_excl_current
+        "最新市盈率",                        # pettm_at_date
+        "5年内PE谷底-15%值",                 # pe_5y_trough_low_15
+        "5年内PE谷底+15%值",                 # pe_5y_trough_high_15
+        "最新PE是否在5年PE谷底±15%内",        # pe_5y_in_trough_15
+        "10年内PE谷底-15%值",                # pe_10y_trough_low_15
+        "10年内PE谷底+15%值",                # pe_10y_trough_high_15
+        "最新PE是否在10年PE谷底±15%内",       # pe_10y_in_trough_15
+        "5年内PB谷底-15%值",                 # pb_5y_trough_low_15
+        "5年内PB谷底+15%值",                 # pb_5y_trough_high_15
+        "最新PB是否在5年PB谷底±15%内",        # pb_5y_in_trough_15
+        "10年内PB谷底-15%值",                # pb_10y_trough_low_15
+        "10年内PB谷底+15%值",                # pb_10y_trough_high_15
+        "最新PB是否在10年PB谷底±15%内",       # pb_10y_in_trough_15
+        "预估每股净利润增长率(%)",            # mean_e_growth_rate
+        "PEG",                              # PEG
+        "5年均值PE回归的收益率(%)",           # predict_revenue_5y
+        "10年均值PE回归的收益率(%)",          # predict_revenue_10y
+        "最新市净率",                        # pbmrq_at_date
+        "5年均值回归的市净率",                # mean_pbmrq_5y
+        "10年均值回归的市净率",               # mean_pbmrq_10y
+        "5年均值PB回归的涨幅(%)",             # predict_pb_return_5y
+        "10年均值PB回归的涨幅(%)",            # predict_pb_return_10y
+        "报告信息"                           # report_infos
     ]
 
     res_df = res_df[cols]

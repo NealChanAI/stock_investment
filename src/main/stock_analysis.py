@@ -379,6 +379,8 @@ def get_pe_info(stock_code, target_date=None, period=["10Y", "5Y"]):
     # 确保日期列是datetime类型
     pettm_df['date'] = pd.to_datetime(pettm_df['date'])
     target_date_obj = datetime.strptime(target_date, '%Y-%m-%d')
+    # 当前最近交易日（用于后续剔除“当前值”本身）
+    current_trade_date_dt = datetime.strptime(last_trading_date, '%Y-%m-%d')
     
     # 计算最近10年的开始日期（更准确的年份计算）
     start_year_10y = target_date_obj.year - 10
@@ -405,6 +407,13 @@ def get_pe_info(stock_code, target_date=None, period=["10Y", "5Y"]):
     else:
         mean_pettm_10y = float(valid_pettm_10y.mean())
         # print(f'最近10年平均peTTM: {mean_pettm_10y:.4f} (基于 {len(valid_pettm_10y)} 条有效数据)')
+
+    # 计算最近10年（不含当前最近交易日）的历史最低 peTTM
+    min_pettm_10y_excl_current = None
+    hist_10y_excl = pettm_10y[pettm_10y['date'] < current_trade_date_dt].copy()
+    valid_hist_10y_excl = hist_10y_excl['peTTM'].dropna()
+    if not valid_hist_10y_excl.empty:
+        min_pettm_10y_excl_current = float(valid_hist_10y_excl.min())
     
     # 计算最近5年的开始日期（更准确的年份计算）
     start_year_5y = target_date_obj.year - 5
@@ -428,8 +437,15 @@ def get_pe_info(stock_code, target_date=None, period=["10Y", "5Y"]):
     else:
         mean_pettm_5y = float(valid_pettm_5y.mean())
         # print(f'最近5年平均peTTM: {mean_pettm_5y:.4f} (基于 {len(valid_pettm_5y)} 条有效数据)')
+
+    # 计算最近5年（不含当前最近交易日）的历史最低 peTTM
+    min_pettm_5y_excl_current = None
+    hist_5y_excl = pettm_5y[pettm_5y['date'] < current_trade_date_dt].copy()
+    valid_hist_5y_excl = hist_5y_excl['peTTM'].dropna()
+    if not valid_hist_5y_excl.empty:
+        min_pettm_5y_excl_current = float(valid_hist_5y_excl.min())
     
-    # pbMRQ统计
+    # pbMRQ统计：均值
     valid_pbmrq_10y = pettm_10y['pbMRQ'].dropna()
     if valid_pbmrq_10y.empty:
         mean_pbmrq_10y = None
@@ -446,15 +462,32 @@ def get_pe_info(stock_code, target_date=None, period=["10Y", "5Y"]):
         mean_pbmrq_5y = float(valid_pbmrq_5y.mean())
         # print(f'最近5年平均pbMRQ: {mean_pbmrq_5y:.4f} (基于 {len(valid_pbmrq_5y)} 条有效数据)')
 
+    # pbMRQ统计：最近10年 / 5年（不含当前最近交易日）的历史最低 PB
+    min_pbmrq_10y_excl_current = None
+    hist_pb_10y_excl = pettm_10y[pettm_10y['date'] < current_trade_date_dt].copy()
+    valid_hist_pb_10y_excl = hist_pb_10y_excl['pbMRQ'].dropna()
+    if not valid_hist_pb_10y_excl.empty:
+        min_pbmrq_10y_excl_current = float(valid_hist_pb_10y_excl.min())
+
+    min_pbmrq_5y_excl_current = None
+    hist_pb_5y_excl = pettm_5y[pettm_5y['date'] < current_trade_date_dt].copy()
+    valid_hist_pb_5y_excl = hist_pb_5y_excl['pbMRQ'].dropna()
+    if not valid_hist_pb_5y_excl.empty:
+        min_pbmrq_5y_excl_current = float(valid_hist_pb_5y_excl.min())
+
     return {
         'stock_code': stock_code,
         'target_date': target_date,
         'pettm_at_date': float(pettm_at_date),
         'mean_pettm_10y': mean_pettm_10y,
         'mean_pettm_5y': mean_pettm_5y,
+        'min_pettm_10y_excl_current': min_pettm_10y_excl_current,
+        'min_pettm_5y_excl_current': min_pettm_5y_excl_current,
         'pbmrq_at_date': float(pbmrq_at_date),
         'mean_pbmrq_10y': mean_pbmrq_10y,
-        'mean_pbmrq_5y': mean_pbmrq_5y
+        'mean_pbmrq_5y': mean_pbmrq_5y,
+        'min_pbmrq_10y_excl_current': min_pbmrq_10y_excl_current,
+        'min_pbmrq_5y_excl_current': min_pbmrq_5y_excl_current
     }
 
 

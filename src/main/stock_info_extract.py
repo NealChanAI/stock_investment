@@ -7,11 +7,15 @@ import os
 from stock_analysis import get_stock_info
 
 # STOCK_FILE_NAME = "sz50_stocks.csv"
-STOCK_FILE_NAME = "hs300_stocks.csv" 
+# STOCK_FILE_NAME = "self_selected_stocks.csv" 
+# STOCK_FILE_NAME = "hs300_stocks.csv" 
+STOCK_FILE_NAME = "zz500_stocks.csv" 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = osp.join(ROOT_DIR, "data")
 STOCK_LIST_FILE = osp.join(DATA_DIR, STOCK_FILE_NAME)
 OUTPUT_DIR = osp.join(DATA_DIR, "stock_analysis_results")
+# 基于输入文件名生成输出文件名（去掉.csv后缀）
+OUTPUT_FILE_NAME = STOCK_FILE_NAME.replace(".csv", "")
 
 
 def load_all_codes(csv_path: str):
@@ -157,7 +161,7 @@ def save_results(res_df, output_dir: str, file_name: str):
 
 
 
-def process_stocks(csv_path: str = STOCK_LIST_FILE, output_dir: str = OUTPUT_DIR, file_name: str = "stock_analysis"):
+def process_stocks(csv_path: str = STOCK_LIST_FILE, output_dir: str = OUTPUT_DIR, file_name: str = OUTPUT_FILE_NAME):
     """
     批量处理股票列表，调用get_stock_info获取信息并保存到CSV
     

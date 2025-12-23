@@ -26,7 +26,12 @@ while (rs.error_code == '0') & rs.next():
     zz500_stocks.append(rs.get_row_data())
 result = pd.DataFrame(zz500_stocks, columns=rs.fields)
 # 结果集输出到csv文件
-result.to_csv("data/zz500_stocks.csv", encoding="gbk", index=False)
+import os
+# 确保项目根目录下的data目录存在
+data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'data')
+os.makedirs(data_dir, exist_ok=True)
+result.to_csv(os.path.join(data_dir, "zz500_stocks.csv"), encoding="utf-8", index=False)
+
 print(result)
 
 # 登出系统

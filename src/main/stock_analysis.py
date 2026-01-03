@@ -652,7 +652,86 @@ def test():
     res = get_recent_predict_peTTM("601888")
     print(res)
 
+def _test():
+    # 1. 登录系统 + 强制校验登录结果（核心修复1）
+    lg = bs.login()
+    if lg.error_code != '0':
+        print(f"❌ 登录失败：{lg.error_msg}")
+        return
+    print(f"✅ 登录成功：{lg.error_msg}")
+
+    etf_code = 'sh.510300'  # 华泰柏瑞沪深300ETF
+    # 2. 查询ETF日线数据
+    rs = bs.query_history_k_data_plus(
+        etf_code,
+        "date,open,high,low,close,volume,amount,turn",
+        start_date='2024-01-01',
+        end_date='2025-01-08',
+        frequency="d",
+        adjustflag="3"  # ETF专用：不复权
+    )
+
+    # 3. 校验查询请求是否成功
+    if rs.error_code != '0':
+        print(f"❌ 数据查询失败：{rs.error_msg}")
+        bs.logout()
+        return
+
+    # 4. 读取数据（核心修复2：循环逻辑更正）
+    data_list = []
+    while rs.next():  # ✅ 正确写法：先判断是否有下一条，再读取
+        data_list.append(rs.get_row_data())
+
+    # 5. 空数据校验
+    if not data_list:
+        print(f"❌ 未查询到 {etf_code} 的数据，请检查时间范围/代码")
+        bs.logout()
+        return
+
+    # 6. 构建DataFrame + 字段命名优化（核心修复3）
+    columns = ["日期", "开盘价", "最高价", "最低价", "收盘价", "成交量", "成交额", "换手率"]
+    df = pd.DataFrame(data_list, columns=columns)
+    
+    # 7. 数据类型转换（字符串→数值，必备！否则无法做计算）
+    num_cols = ["开盘价", "最高价", "最低价", "收盘价", "成交量", "成交额", "换手率"]
+    df[num_cols] = df[num_cols].astype(float)
+
+    # 8. 打印结果
+    print(f"\n✅ 成功获取 {etf_code} 数据，共【{len(df)}】条")
+    print(df.head(10))  # 打印前10条
+
+    # 9. 登出系统
+    bs.logout()
+    print("\n✅ 已登出Baostock系统")
+    return df
+
+def _test2():
+    import akshare as ak
+
+    # 1. 获取510300的ETF完整数据
+    etf_df = ak.fund_etf_hist_sina(symbol="sh510300")  # 这里symbol写"510300"也可以（无需加sh.）
+    print(f"原始数据共【{len(etf_df)}】条")
+
+    # 2. （可选但推荐）将date列转为datetime类型，方便精准筛选
+    etf_df['date'] = pd.to_datetime(etf_df['date'])
+
+    # 3. 定义要筛选的时间范围（示例：筛选2025年12月的所有数据）
+    start_filter_date = "2025-12-31"  # 起始日期
+    end_filter_date = "2025-12-31"    # 结束日期
+
+    # 4. 执行时间筛选
+    etf_df_filtered = etf_df[
+        (etf_df['date'] >= start_filter_date) & 
+        (etf_df['date'] <= end_filter_date)
+    ]
+
+    # 5. 打印筛选结果
+    print(f"\n筛选后（{start_filter_date}至{end_filter_date}）的数据共【{len(etf_df_filtered)}】条")
+    print(etf_df_filtered)  # 若数据多，可改用 etf_df_filtered.tail(10) 看末尾10条
+
 if __name__ == "__main__":
-    main()
+    # main()
     # test()
+    # _test()
+    _test2()
     

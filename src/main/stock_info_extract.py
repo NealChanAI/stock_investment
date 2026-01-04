@@ -7,9 +7,9 @@ import os
 from stock_analysis import get_stock_info
 
 # STOCK_FILE_NAME = "sz50_stocks.csv"
-STOCK_FILE_NAME = "self_selected_stocks.csv" 
+# STOCK_FILE_NAME = "self_selected_stocks.csv" 
 # STOCK_FILE_NAME = "hs300_stocks.csv" 
-# STOCK_FILE_NAME = "zz500_stocks.csv" 
+STOCK_FILE_NAME = "zz500_stocks.csv" 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = osp.join(ROOT_DIR, "data")
 STOCK_LIST_FILE = osp.join(DATA_DIR, STOCK_FILE_NAME)
@@ -219,6 +219,16 @@ def post_process_results(result_rows):
         "min_pbmrq_5y_excl_current",
         "min_pbmrq_10y_excl_current",
         "pettm_at_date",
+        "mean_e_growth_rate",
+        "PEG",
+        "predict_revenue_5y",
+        "predict_revenue_10y",
+        "pbmrq_at_date",
+        "mean_pbmrq_5y",
+        "mean_pbmrq_10y",
+        "predict_pb_return_5y",
+        "predict_pb_return_10y",
+        # 下面这 8 个是 5/10 年 PE/PB 谷底 ±15% 及命中标记，整体挪到报告信息之前
         "pe_5y_trough_low_15",
         "pe_5y_trough_high_15",
         "pe_5y_in_trough_15",
@@ -231,15 +241,6 @@ def post_process_results(result_rows):
         "pb_10y_trough_low_15",
         "pb_10y_trough_high_15",
         "pb_10y_in_trough_15",
-        "mean_e_growth_rate",
-        "PEG",
-        "predict_revenue_5y",
-        "predict_revenue_10y",
-        "pbmrq_at_date",
-        "mean_pbmrq_5y",
-        "mean_pbmrq_10y",
-        "predict_pb_return_5y",
-        "predict_pb_return_10y",
         "report_infos"
     ]
 
@@ -255,18 +256,6 @@ def post_process_results(result_rows):
         "5年内(不含当前)最低市净率",          # min_pbmrq_5y_excl_current
         "10年内(不含当前)最低市净率",         # min_pbmrq_10y_excl_current
         "最新市盈率",                        # pettm_at_date
-        "5年内PE谷底-15%值",                 # pe_5y_trough_low_15
-        "5年内PE谷底+15%值",                 # pe_5y_trough_high_15
-        "最新PE是否在5年PE谷底±15%内",        # pe_5y_in_trough_15
-        "10年内PE谷底-15%值",                # pe_10y_trough_low_15
-        "10年内PE谷底+15%值",                # pe_10y_trough_high_15
-        "最新PE是否在10年PE谷底±15%内",       # pe_10y_in_trough_15
-        "5年内PB谷底-15%值",                 # pb_5y_trough_low_15
-        "5年内PB谷底+15%值",                 # pb_5y_trough_high_15
-        "最新PB是否在5年PB谷底±15%内",        # pb_5y_in_trough_15
-        "10年内PB谷底-15%值",                # pb_10y_trough_low_15
-        "10年内PB谷底+15%值",                # pb_10y_trough_high_15
-        "最新PB是否在10年PB谷底±15%内",       # pb_10y_in_trough_15
         "预估每股净利润增长率(%)",            # mean_e_growth_rate
         "PEG",                              # PEG
         "5年均值PE回归的收益率(%)",           # predict_revenue_5y
@@ -276,6 +265,19 @@ def post_process_results(result_rows):
         "10年均值回归的市净率",               # mean_pbmrq_10y
         "5年均值PB回归的涨幅(%)",             # predict_pb_return_5y
         "10年均值PB回归的涨幅(%)",            # predict_pb_return_10y
+        # 8 个谷底 ±15% 相关字段，挪到报告信息之前
+        "5年内PE谷底-15%值",                 # pe_5y_trough_low_15
+        "5年内PE谷底+15%值",                 # pe_5y_trough_high_15
+        "最新PE是否在5年PE谷底±15%内",        # pe_5y_in_trough_15
+        "10年内PE谷底-15%值",                # pe_10y_trough_low_15
+        "10年内PE谷底+15%值",                # pe_10y_trough_high_15
+        "最新PE是否在10年PE谷底±15%内",       # pe_10y_in_trough_15
+        "5年内PB谷底-15%值",                 # pb_5y_trough_low_15
+        "5年内PB谷底+15%值",                 # pb_5y_trrough_high_15
+        "最新PB是否在5年PB谷底±15%内",        # pb_5y_in_trough_15
+        "10年内PB谷底-15%值",                # pb_10y_trough_low_15
+        "10年内PB谷底+15%值",                # pb_10y_trrough_high_15
+        "最新PB是否在10年PB谷底±15%内",       # pb_10y_in_trough_15
         "报告信息"                           # report_infos
     ]
 

@@ -7,12 +7,15 @@ from pathlib import Path
 from datetime import datetime
 
 # 输入文件名配置：必须指定要处理的 Excel 文件名
-INPUT_FILE_NAME = "self_selected_stocks_20251223_111026.xlsx"
+INPUT_FILE_NAME = "self_selected_stocks_20251223_174923.xlsx"
 
 """
-1. 5年均值PE回归的收益率(%)大于30%
-2. 10年均值PE回归的收益率(%)大于30%
-3. PEG < 1.5
+1. 5年均值PE回归的收益率(%)大于30% 且 10年均值PE回归的收益率(%)大于30% 且 PEG < 1.5 且 g > 15% 且 
+    5年PB均值回归的涨幅(%)大于10% 且 10年PB均值回归的涨幅(%)大于10% 且 最新交易日的PE在5年PE谷底值的正负10%以内 且 最新交易日的PE在10年PE谷底值的正负10%以内
+2. 5年均值PE回归的收益率(%)大于30% 且 10年均值PE回归的收益率(%)大于30% 且 PEG < 1.5 且 g > 15%
+
+2. 
+3. 
 4. g > 10%
 5. 5年均值PB回归的涨幅(%)大于10%
 6. 10年均值PB回归的涨幅(%)大于10%

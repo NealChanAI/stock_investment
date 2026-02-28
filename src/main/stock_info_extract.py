@@ -7,9 +7,9 @@ import os
 from stock_analysis import get_stock_info
 
 # STOCK_FILE_NAME = "sz50_stocks.csv"
-# STOCK_FILE_NAME = "self_selected_stocks.csv" 
+STOCK_FILE_NAME = "self_selected_stocks.csv" 
 # STOCK_FILE_NAME = "hs300_stocks.csv" 
-STOCK_FILE_NAME = "zz500_stocks.csv" 
+# STOCK_FILE_NAME = "zz500_stocks.csv" 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = osp.join(ROOT_DIR, "data")
 STOCK_LIST_FILE = osp.join(DATA_DIR, STOCK_FILE_NAME)

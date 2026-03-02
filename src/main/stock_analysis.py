@@ -491,56 +491,178 @@ def get_pe_info(stock_code, target_date=None, period=["10Y", "5Y"]):
     }
 
 
-def get_recent_predict_peTTM(stock_code):
+def get_recent_predict_peTTM(stock_code, as_of_date=None, lookback_days=60):
     """
-    get recent predict peTTM from akshare
+    从 akshare 获取研报中的预测 peTTM，并计算盈利增长率 g
+
+    支持回测：
+    - 如果传入 as_of_date，则只使用该日期之前、且在 lookback_days 天窗口内的研报
+    - 如果不传 as_of_date，则使用最近一段时间（约 30 天内的一组研报）
+
+    Args:
+        stock_code (str): 6 位股票代码，如 "600519"
+        as_of_date (str | None): 评估日期，格式 "YYYY-MM-DD"，用于回测
+        lookback_days (int): 向前回看的天数窗口（默认 60 天）
     """
     report_df = ak.stock_research_report_em(symbol=stock_code)
-    report_df = report_df[['股票代码', '股票简称', '2025-盈利预测-市盈率', '2026-盈利预测-市盈率', '2027-盈利预测-市盈率', '机构', '报告PDF链接', '日期']]
-    report_df.columns = ['stock_code', 'stock_name', 'predict_peTTM_2025', 'predict_peTTM_2026', 'predict_peTTM_2027', 'institution', 'report_pdf_link', 'date']
+    
+    # 检查接口返回的所有列，查找年份相关的列
+    all_columns = report_df.columns.tolist()
+    
+    # 查找年份相关的列（2025-2029）
+    year_columns = {}
+    for col in all_columns:
+        for year in ['2025', '2026', '2027', '2028', '2029']:
+            if year in str(col) and '盈利预测' in str(col) and '市盈率' in str(col):
+                year_columns[year] = col
+                break
+    
+    # 确定要使用的列
+    base_columns = ['股票代码', '股票简称', '机构', '报告PDF链接', '日期']
+    selected_year_columns = []
+    column_mapping = {}
+    
+    # 优先使用2028年数据（如果存在），否则使用2027年
+    if '2028' in year_columns:
+        # 使用2026和2028年计算增长率（3年）
+        selected_year_columns = ['2025', '2026', '2027', '2028']
+        column_mapping = {
+            year_columns['2025']: 'predict_peTTM_2025',
+            year_columns['2026']: 'predict_peTTM_2026',
+            year_columns['2027']: 'predict_peTTM_2027',
+            year_columns['2028']: 'predict_peTTM_2028'
+        }
+        use_2028 = True
+        start_year = '2026'
+        end_year = '2028'
+    elif '2027' in year_columns:
+        # 使用2025和2027年计算增长率（2年，开平方根得到年化）
+        selected_year_columns = ['2025', '2026', '2027']
+        column_mapping = {
+            year_columns['2025']: 'predict_peTTM_2025',
+            year_columns['2026']: 'predict_peTTM_2026',
+            year_columns['2027']: 'predict_peTTM_2027'
+        }
+        use_2028 = False
+        start_year = '2025'
+        end_year = '2027'
+    else:
+        # 如果没有找到预期的年份列，返回None
+        print(f"警告: 股票 {stock_code} 未找到2025-2027年的预测市盈率数据")
+        return None
+    
+    # 选择需要的列
+    needed_columns = base_columns + [year_columns[y] for y in selected_year_columns if y in year_columns]
+    report_df = report_df[needed_columns].copy()
+    
+    # 重命名列
+    rename_dict = {}
+    for old_col, new_col in column_mapping.items():
+        rename_dict[old_col] = new_col
+    rename_dict.update({
+        '股票代码': 'stock_code',
+        '股票简称': 'stock_name',
+        '机构': 'institution',
+        '报告PDF链接': 'report_pdf_link',
+        '日期': 'date'
+    })
+    report_df = report_df.rename(columns=rename_dict)
+
+    # 确保日期列为 datetime 类型，便于按日期过滤
+    report_df['date'] = pd.to_datetime(report_df['date'])
     report_df = report_df.sort_values(by='date', ascending=False).reset_index(drop=True)
+
+    # ---- 按日期过滤研报（支持回测） ----
+    if as_of_date is not None:
+        # 回测模式：只使用 as_of_date 之前、且在 lookback_days 天窗口内的研报
+        as_of_ts = pd.to_datetime(as_of_date)
+        start_ts = as_of_ts - pd.Timedelta(days=lookback_days)
+        mask = (report_df['date'] <= as_of_ts) & (report_df['date'] >= start_ts)
+        filtered_df = report_df.loc[mask].copy()
+
+        # 如果窗口内没有研报，尝试放宽窗口到 365 天；仍然没有则返回 None
+        if filtered_df.empty:
+            wider_start_ts = as_of_ts - pd.Timedelta(days=365)
+            mask = (report_df['date'] <= as_of_ts) & (report_df['date'] >= wider_start_ts)
+            filtered_df = report_df.loc[mask].copy()
+
+        if filtered_df.empty:
+            print(f"警告: 股票 {stock_code} 在 {as_of_date} 之前 {lookback_days}~365 天内无研报预测数据")
+            return None
+
+        report_df = filtered_df.reset_index(drop=True)
+    else:
+        # 实时模式：使用最近一段时间（约 30 天内的一组研报）
+        dates_lst = report_df['date'].to_list()
+        idx = -1
+        for i in range(len(dates_lst)):
+            if i == 0:
+                continue
+            if (dates_lst[i - 1] - dates_lst[i]).days > 30:
+                idx = i
+                break
+
+        # 如果找到分界点，则只保留最近的一组研报；否则保留全部
+        if idx != -1:
+            report_df = report_df.iloc[:idx].reset_index(drop=True)
     
-    # 根据日期对数据进行分组, 相隔超过30天的则为两个分组
-    dates_lst = report_df['date'].to_list()
-    idx = -1 
-    for i in range(len(dates_lst)):
-        if i == 0:
-            continue
-        if (dates_lst[i-1] - dates_lst[i]).days > 30:
-            idx = i
-            break
-    
-    report_df = report_df.iloc[:idx]
-    # 剔除掉predict_peTTM_2025~2027中有任一数据为空的行
-    report_df = report_df.dropna(subset=['predict_peTTM_2025', 'predict_peTTM_2026', 'predict_peTTM_2027']).reset_index(drop=True)
-    
-    def calculate_e_growth_rate(row):
-        """计算每股净利润增长率，只有当两个预测市盈率都是正数时才进行开平方"""
-        pe2025 = row['predict_peTTM_2025']
-        pe2027 = row['predict_peTTM_2027']
+    # 根据使用的年份确定需要检查的列
+    if use_2028:
+        # 使用2025和2028年计算（3年）
+        required_cols = ['predict_peTTM_2025', 'predict_peTTM_2028']
+        report_df = report_df.dropna(subset=required_cols).reset_index(drop=True)
         
-        # 检查是否为复数或负数
-        if isinstance(pe2025, complex) or isinstance(pe2027, complex):
-            return float('nan')
+        def calculate_e_growth_rate(row):
+            """计算每股净利润增长率（3年期：2025到2028）"""
+            pe_start = row['predict_peTTM_2025']
+            pe_end = row['predict_peTTM_2028']
+            
+            if isinstance(pe_start, complex) or isinstance(pe_end, complex):
+                return float('nan')
+            
+            try:
+                pe_start_val = float(pe_start)
+                pe_end_val = float(pe_end)
+            except (ValueError, TypeError):
+                return float('nan')
+            
+            if pe_start_val > 0 and pe_end_val > 0:
+                ratio = pe_start_val / pe_end_val
+                # 3年期，开立方根
+                result = (ratio ** (1.0/3)) - 1
+                if isinstance(result, complex):
+                    return result.real
+                return float(result)
+            else:
+                return float('nan')
+    else:
+        # 使用2025和2027年计算（2年，开平方根得到年化）
+        required_cols = ['predict_peTTM_2025', 'predict_peTTM_2026', 'predict_peTTM_2027']
+        report_df = report_df.dropna(subset=required_cols).reset_index(drop=True)
         
-        # 转换为浮点数并检查是否为正数
-        try:
-            pe2025_val = float(pe2025)
-            pe2027_val = float(pe2027)
-        except (ValueError, TypeError):
-            return float('nan')
-        
-        # 只有当两个值都是正数时才进行开平方
-        if pe2025_val > 0 and pe2027_val > 0:
-            ratio = pe2025_val / pe2027_val
-            # ratio 一定大于 0，因为两个除数都是正数
-            result = (ratio ** 0.5) - 1
-            # 确保结果是实数
-            if isinstance(result, complex):
-                return result.real
-            return float(result)
-        else:
-            return float('nan')
+        def calculate_e_growth_rate(row):
+            """计算每股净利润增长率（2年期：2025到2027，开平方根得到年化）"""
+            pe2025 = row['predict_peTTM_2025']
+            pe2027 = row['predict_peTTM_2027']
+            
+            if isinstance(pe2025, complex) or isinstance(pe2027, complex):
+                return float('nan')
+            
+            try:
+                pe2025_val = float(pe2025)
+                pe2027_val = float(pe2027)
+            except (ValueError, TypeError):
+                return float('nan')
+            
+            if pe2025_val > 0 and pe2027_val > 0:
+                ratio = pe2025_val / pe2027_val
+                # 2年期，开平方根得到年化增长率
+                result = (ratio ** 0.5) - 1
+                if isinstance(result, complex):
+                    return result.real
+                return float(result)
+            else:
+                return float('nan')
     
     report_df['e_growth_rate'] = report_df.apply(calculate_e_growth_rate, axis=1)
     
@@ -556,9 +678,12 @@ def get_recent_predict_peTTM(stock_code):
         mean_e_growth_rate = float(mean_e_growth_rate)
 
     # 每条报告的关键信息按照 \001 拼接，每条之间用 \n 拼接
-    info_columns = [
-        'institution', 'date', 'predict_peTTM_2025', 'predict_peTTM_2026', 'predict_peTTM_2027', 'e_growth_rate', 'report_pdf_link'
-    ]
+    info_columns = ['institution', 'date', 'e_growth_rate', 'report_pdf_link']
+    # 添加所有可用的年份列
+    for year in ['2025', '2026', '2027', '2028']:
+        col_name = f'predict_peTTM_{year}'
+        if col_name in report_df.columns:
+            info_columns.insert(-1, col_name)  # 插入到e_growth_rate之前
     def row_to_str(row):
         return '  '.join([
             str(row.get(col, "")) if row.get(col, "") is not None else "" for col in info_columns

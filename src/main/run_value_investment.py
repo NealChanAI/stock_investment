@@ -52,7 +52,7 @@ def run_value_investment_analysis(
     print("开始评估股票...")
     print("=" * 80)
     
-    results_df = system.evaluate_stock_list(stock_codes, target_date)
+    results_df = system.evaluate_stock_list(stock_codes, target_date, stock_records=stock_records)
     
     if results_df.empty:
         print("没有获取到任何评估结果")
@@ -84,7 +84,7 @@ def run_value_investment_analysis(
     print("选出最佳股票组合...")
     print("=" * 80)
     
-    best_stocks = system.select_best_stocks(stock_codes, target_date)
+    best_stocks = system.select_best_stocks(stock_codes, target_date, evaluation_df=results_df, stock_records=stock_records)
     
     if best_stocks:
         # 转换为DataFrame并保存

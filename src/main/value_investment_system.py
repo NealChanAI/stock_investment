@@ -394,7 +394,8 @@ class ValueInvestmentSystem:
     def evaluate_stock_list(
         self, 
         stock_codes: List[str], 
-        target_date: Optional[str] = None
+        target_date: Optional[str] = None,
+        stock_records: Optional[List[dict]] = None
     ) -> pd.DataFrame:
         """
         评估股票列表，返回符合买入条件的股票
@@ -402,14 +403,22 @@ class ValueInvestmentSystem:
         Args:
             stock_codes: 股票代码列表
             target_date: 目标日期，格式为YYYY-MM-DD
+            stock_records: 可选的股票记录列表 [{'code': str, 'code_name': str}]，用于显示股票名称
         
         Returns:
             包含评估结果的DataFrame
         """
         results = []
+        # 构建 code -> name 映射
+        code_to_name = {}
+        if stock_records:
+            for r in stock_records:
+                code_to_name[r.get('code', '')] = r.get('code_name', '')
         
         for idx, code in enumerate(stock_codes, 1):
-            print(f"[{idx}/{len(stock_codes)}] 正在评估: {code}")
+            name = code_to_name.get(code, '')
+            name_part = f" {name}" if name else ""
+            print(f"[{idx}/{len(stock_codes)}] 正在评估: {code}{name_part}")
             
             try:
                 # 获取股票信息
@@ -468,7 +477,8 @@ class ValueInvestmentSystem:
         self, 
         stock_codes: List[str], 
         target_date: Optional[str] = None,
-        evaluation_df: Optional[pd.DataFrame] = None
+        evaluation_df: Optional[pd.DataFrame] = None,
+        stock_records: Optional[List[dict]] = None
     ) -> List[Dict]:
         """
         从股票列表中选出最符合买入条件的股票
@@ -477,13 +487,14 @@ class ValueInvestmentSystem:
             stock_codes: 股票代码列表
             target_date: 目标日期
             evaluation_df: 可选的评估结果DataFrame，如果提供则跳过评估步骤
+            stock_records: 可选的股票记录列表，用于评估时显示股票名称
         
         Returns:
             选出的股票列表（包含完整的股票信息）
         """
         # 如果没有提供评估结果，则进行评估
         if evaluation_df is None:
-            df = self.evaluate_stock_list(stock_codes, target_date)
+            df = self.evaluate_stock_list(stock_codes, target_date, stock_records=stock_records)
         else:
             df = evaluation_df
         

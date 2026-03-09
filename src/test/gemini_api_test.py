@@ -11,7 +11,6 @@ print(f"GEMINI_API_KEY_STOCK_INVESTMENT: {os.environ.get('GEMINI_API_KEY_STOCK_I
 def generate():
     client = genai.Client(
         api_key=os.environ.get("GEMINI_API_KEY_STOCK_INVESTMENT"),
-        # api_key="AIzaSyCrSW7BR8BtleDLlsV0k5EsljC7CC24XN0"
     )
 
     model = "gemini-3.1-flash-lite-preview"

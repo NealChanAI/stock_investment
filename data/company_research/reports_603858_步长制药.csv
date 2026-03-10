@@ -1,4 +1,4 @@
-﻿author,content,filename,org_name,original_rating,pdf_link,publish_time,rating_adjust_mark_type,rating_changes,report_id,save_path,stock_code,stock_name,title,extracted_forecasts
+﻿author,content,filename,org_name,original_rating,pdf_link,publish_time,rating_adjust_mark_type,rating_changes,report_id,save_path,stock_code,stock_name,title,extracted_forecasts,PE_2年前,PE_1年前,PE_当年,PE_明年,PE_后年,PE_大后年,EPS_2年前,EPS_1年前,EPS_当年,EPS_明年,EPS_后年,EPS_大后年
 "何治力,朱国广,陈铁林","事件：公司 2018] 年营业收入、扣非净利润分别约为 136.7 亿元、15.3 亿元，同
 比增速分别约为-1.4%、5.2%；2019Q1 营业收入、扣非净利润分别约为 28.8
 亿元、2.8 亿元，同比增速分别约为 18.6%、68.3%。  Q1 业绩超市场预期，全年预计平稳增长。公司 2018 年收入约为 137 亿元，同
@@ -53,7 +53,7 @@
             ""pe"": 12
         }
     ]
-}"
+}",,,14.0,13.0,12.0,,,,2.26,2.39,2.53,
 "朱国广,周平","投资要点
 
 事件：公司发布2017年一季报，实现营业收入24.3亿元（+21%）、归母净利润2.2亿元（+15%）、扣非后归母净利润2.0亿元（+38%）。
@@ -85,4 +85,4 @@
       ""pe"": 18
     }
   ]
-}"
+}",,,25.0,21.0,18.0,,,,3.24,3.9,4.61,

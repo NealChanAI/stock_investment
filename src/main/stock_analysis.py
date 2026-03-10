@@ -6,6 +6,11 @@ import pandas as pd
 import baostock as bs
 import akshare as ak
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Optional
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+COMPANY_STOCK_INFO_DIR = ROOT_DIR / "data" / "company_stock_info"
 
 
 def baostock_login():
@@ -76,71 +81,25 @@ def get_history_pettm_data(stock_code, end_date, period="10Y"):
     Returns:
         pandas.DataFrame: 包含 date 和 peTTM 列的 DataFrame，如果出错返回 None
     """
-    lg = baostock_login()
-    
+    period_years = parse_period(period)
+    last_trading_date = get_last_trading_date_before(end_date)
+    if last_trading_date is None:
+        df_wide = _load_pettm_from_local(stock_code, "2000-01-01", end_date)
+        if df_wide is not None and not df_wide.empty:
+            before = df_wide[df_wide["date"] <= end_date]["date"]
+            last_trading_date = str(before.max()) if not before.empty else None
+    if last_trading_date is None:
+        return None
+    last_date = datetime.strptime(last_trading_date, '%Y-%m-%d')
+    start_year = last_date.year - period_years
     try:
-        # 解析周期参数
-        period_years = parse_period(period)
-        # print(f'查询周期: {period_years}年')
-        
-        # 获取距离 end_date 最近的上一个交易日
-        last_trading_date = get_last_trading_date_before(end_date)
-        if last_trading_date is None:
-            print('无法获取上一个交易日')
-            return None
-        
-        # print(f'结束日期: {end_date}，上一个交易日: {last_trading_date}')
-        
-        # 计算N年前的日期（使用年份减去，更准确）
-        last_date = datetime.strptime(last_trading_date, '%Y-%m-%d')
-        start_year = last_date.year - period_years
-        # 处理闰年2月29日的情况
-        try:
-            start_date = datetime(start_year, last_date.month, last_date.day).strftime('%Y-%m-%d')
-        except ValueError:
-            # 如果目标年份不是闰年且日期是2月29日，则使用2月28日
-            start_date = datetime(start_year, last_date.month, 28).strftime('%Y-%m-%d')
-        
-        # print(f'查询日期范围: {start_date} 至 {last_trading_date}')
-        
-        # 查询历史K线数据，只获取 date 和 peTTM 字段
-        rs = bs.query_history_k_data_plus(
-            stock_code,
-            "date,peTTM",  # 只获取日期和滚动市盈率
-            start_date=start_date,
-            end_date=last_trading_date,
-            frequency="d",  # 日线数据
-            adjustflag="3"  # 不复权
-        )
-        
-        if rs.error_code != '0':
-            print(f'query_history_k_data_plus respond error_code: {rs.error_code}')
-            print(f'query_history_k_data_plus respond error_msg: {rs.error_msg}')
-            return None
-        
-        # 处理结果集
-        data_list = []
-        while (rs.error_code == '0') & rs.next():
-            data_list.append(rs.get_row_data())
-        
-        if not data_list:
-            print('未获取到数据')
-            return None
-        
-        # 转换为DataFrame
-        result = pd.DataFrame(data_list, columns=rs.fields)
-        
-        # 将 peTTM 转换为数值类型
-        result['peTTM'] = pd.to_numeric(result['peTTM'], errors='coerce')
-        
-        # 按日期排序
-        result = result.sort_values('date').reset_index(drop=True)
-        
-        # print(f'成功获取 {len(result)} 条 peTTM 数据')
-        return result
-        
-    finally:
-        baostock_logout(lg)
+        start_date = datetime(start_year, last_date.month, last_date.day).strftime('%Y-%m-%d')
+    except ValueError:
+        start_date = datetime(start_year, last_date.month, 28).strftime('%Y-%m-%d')
+    result = _load_pettm_from_local(stock_code, start_date, last_trading_date)
+    if result is None:
+        return None
+    return result[["date", "peTTM"]] if "pbMRQ" in result.columns else result
 
 def get_current_pettm_and_mean(stock_code, period="10Y", end_date=None):
     """
@@ -225,148 +184,100 @@ def get_current_pettm_and_mean(stock_code, period="10Y", end_date=None):
     
     return result_dict
 
+def _get_last_trading_date_from_local(end_date: str) -> Optional[str]:
+    """从 company_stock_info/trading_dates.csv 读取最近交易日。"""
+    td_path = COMPANY_STOCK_INFO_DIR / "trading_dates.csv"
+    if not td_path.exists():
+        return None
+    try:
+        df = pd.read_csv(td_path, encoding="utf-8-sig")
+        if "date" not in df.columns or df.empty:
+            return None
+        dates = df[df["date"] <= end_date]["date"].astype(str).tolist()
+        return max(dates) if dates else None
+    except Exception:
+        return None
+
+
 def get_last_trading_date_before(end_date):
     """
-    获取指定日期之前最近的上一个交易日
-    
-    Args:
-        end_date (str): 日期字符串，格式为 YYYY-MM-DD
-    
-    Returns:
-        str: 上一个交易日的日期字符串，格式为 YYYY-MM-DD，如果出错返回 None
+    获取指定日期之前最近的上一个交易日。仅从本地 trading_dates.csv 读取。
     """
-    # 将字符串转换为日期对象
     try:
-        end_date_obj = datetime.strptime(end_date, '%Y-%m-%d')
+        datetime.strptime(end_date, '%Y-%m-%d')
     except ValueError:
-        print(f'日期格式错误: {end_date}，应为 YYYY-MM-DD 格式')
         return None
-    
-    # 获取指定日期之前30天的交易日数据，确保能找到上一个交易日
-    start_date = (end_date_obj - timedelta(days=30)).strftime('%Y-%m-%d')
-    
-    lg = baostock_login()
-
-    rs = bs.query_trade_dates(start_date=start_date, end_date=end_date)
-    if rs.error_code != '0':
-        print(f'query_trade_dates respond error_code: {rs.error_code}')
-        print(f'query_trade_dates respond error_msg: {rs.error_msg}')
-        return None
-    
-    # 获取所有交易日
-    trading_dates = []
-    while (rs.error_code == '0') & rs.next():
-        row_data = rs.get_row_data()
-        if row_data[1] == '1':  # is_trading_day == '1' 表示是交易日
-            trading_date = row_data[0]  # calendar_date
-            # 只保留小于等于 end_date 的交易日
-            if trading_date <= end_date:
-                trading_dates.append(trading_date)
-    
-    if not trading_dates:
-        return None
-    
-    baostock_logout(lg)
-    # 返回最后一个交易日（即上一个交易日）
-    return sorted(trading_dates)[-1]
+    return _get_last_trading_date_from_local(end_date)
 
 def get_trading_date(start_date='2018-01-01', end_date=None):
     """
-    获取指定日期范围内的交易日
-    Args:
-        start_date (str): 开始日期，格式为 YYYY-MM-DD
-        end_date (str): 结束日期，格式为 YYYY-MM-DD，如果为 None 则默认使用今天
-    Returns:
-        list: 交易日列表
+    获取指定日期范围内的交易日。仅从本地 trading_dates.csv 读取。
     """
     if end_date is None:
         end_date = datetime.now().strftime('%Y-%m-%d')
-
-    lg = baostock_login()
+    td_path = COMPANY_STOCK_INFO_DIR / "trading_dates.csv"
+    if not td_path.exists():
+        return None
     try:
-        # 查询交易日数据
-        rs = bs.query_trade_dates(start_date=start_date, end_date=end_date)
-        if rs.error_code != '0':
-            print(f'query_trade_dates respond error_code: {rs.error_code}')
-            print(f'query_trade_dates respond error_msg: {rs.error_msg}')
+        df = pd.read_csv(td_path, encoding="utf-8-sig")
+        mask = (df["date"] >= start_date) & (df["date"] <= end_date)
+        return df.loc[mask, "date"].astype(str).tolist()
+    except Exception:
+        return None
+
+
+def _load_pettm_from_local(stock_code: str, start_date: str, end_date: str):
+    """从 company_stock_info 本地 CSV 加载 PE/PB 数据，若无则返回 None。"""
+    simple = str(stock_code).strip().split(".")[-1] if "." in str(stock_code) else str(stock_code).strip()
+    if len(simple) != 6 or not simple.isdigit():
+        return None
+    csv_path = COMPANY_STOCK_INFO_DIR / f"{simple}.csv"
+    if not csv_path.exists():
+        return None
+    try:
+        df = pd.read_csv(csv_path, encoding="utf-8-sig")
+        if "date" not in df.columns or "peTTM" not in df.columns or "pbMRQ" not in df.columns:
             return None
-        
-        # 获取所有交易日
-        trading_dates = []
-        while (rs.error_code == '0') & rs.next():
-            row_data = rs.get_row_data()
-            if row_data[1] == '1':  # is_trading_day == '1' 表示是交易日
-                trading_date = row_data[0]  # calendar_date
-                # 只保留小于等于 end_date 的交易日
-                if trading_date <= end_date:
-                    trading_dates.append(trading_date)
-        
-        return trading_dates
-        
-    finally:
-        baostock_logout(lg)
+        df = df[(df["date"] >= start_date) & (df["date"] <= end_date)].copy()
+        if df.empty:
+            return None
+        df["peTTM"] = pd.to_numeric(df["peTTM"], errors="coerce")
+        df["pbMRQ"] = pd.to_numeric(df["pbMRQ"], errors="coerce")
+        df = df.sort_values("date").reset_index(drop=True)
+        return df[["date", "peTTM", "pbMRQ"]]
+    except Exception:
+        return None
 
 
 def get_history_pettm_data(stock_code, start_date='2000-01-01', end_date=None):
     """
-    获取sotck的历史peTTM数据
+    获取 stock 的历史 peTTM 数据。优先从 data/company_stock_info 本地 CSV 读取。
     """
-    lg = baostock_login()
-    try:
-        rs = bs.query_history_k_data_plus(
-                stock_code,
-                "date,code,peTTM,pbMRQ",  # 获取peTTM与pbMRQ
-                start_date=start_date,
-                end_date=end_date,
-                frequency="d",  # 日线数据
-                adjustflag="3"  # 不复权
-            )
-
-        if rs.error_code != '0':
-            print(f'query_history_k_data_plus respond error_code: {rs.error_code}')
-            print(f'query_history_k_data_plus respond error_msg: {rs.error_msg}')
-            return None
-        
-        # 处理结果集
-        data_list = []
-        while (rs.error_code == '0') & rs.next():
-            data_list.append(rs.get_row_data())
-        
-        if not data_list:
-            print('未获取到数据')
-            return None
-        
-        # 转换为DataFrame
-        result = pd.DataFrame(data_list, columns=rs.fields)
-        
-        # 将 peTTM、pbMRQ 转换为数值类型
-        result['peTTM'] = pd.to_numeric(result['peTTM'], errors='coerce')
-        result['pbMRQ'] = pd.to_numeric(result['pbMRQ'], errors='coerce')
-        
-        # 按日期排序
-        result = result.sort_values('date').reset_index(drop=True)
-        
-        return result
-    
-    finally:
-        baostock_logout(lg)
+    if end_date is None:
+        end_date = datetime.now().strftime("%Y-%m-%d")
+    return _load_pettm_from_local(stock_code, start_date, end_date)
 
 
 def get_pe_info(stock_code, target_date=None, period=["10Y", "5Y"]):
     """
-    获取指定交易日的peTTM和以改天为节点往前推N年的平均peTTM
+    获取指定交易日的peTTM和以改天为节点往前推N年的平均peTTM。仅使用本地数据。
     """
     if target_date is None:
         target_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
 
-    last_trading_date = get_last_trading_date_before(target_date)
+    # 先拉取数据，用较宽 end_date 以覆盖 target_date
+    end_wide = (datetime.strptime(target_date, '%Y-%m-%d') + timedelta(days=30)).strftime('%Y-%m-%d')
+    pettm_df = get_history_pettm_data(stock_code, start_date='2010-01-01', end_date=end_wide)
+    if pettm_df is None or pettm_df.empty:
+        return None
+
+    # 从本地数据推导最近交易日
+    before = pettm_df[pettm_df['date'] <= target_date]['date']
+    last_trading_date = before.max() if not before.empty else None
     if last_trading_date is None:
         return None
-    
-    pettm_df = get_history_pettm_data(stock_code, start_date='2010-01-01', end_date=last_trading_date)
-    if pettm_df is None:
-        return 
-    
+    last_trading_date = str(last_trading_date)
+
     # 获取目标日期的peTTM、pbMRQ
     target_date_mask = pettm_df['date'] == last_trading_date
     if not target_date_mask.any():
@@ -491,19 +402,49 @@ def get_pe_info(stock_code, target_date=None, period=["10Y", "5Y"]):
     }
 
 
-def get_recent_predict_peTTM(stock_code, as_of_date=None, lookback_days=60):
-    """
-    从 akshare 获取研报中的预测 peTTM，并计算盈利增长率 g
+def _load_predict_from_local(stock_code: str):
+    """从 meta.csv 读取 mean_e_growth_rate 等预测数据，若无则返回 None。"""
+    simple = str(stock_code).strip().split(".")[-1] if "." in str(stock_code) else str(stock_code).strip()
+    if len(simple) != 6:
+        return None
+    meta_path = COMPANY_STOCK_INFO_DIR / "meta.csv"
+    if not meta_path.exists():
+        return None
+    try:
+        meta = pd.read_csv(meta_path, encoding="utf-8-sig")
+        meta["_simple"] = meta["code"].astype(str).str.split(".").str[-1]
+        match = meta[meta["_simple"] == simple]
+        if match.empty:
+            return None
+        row = match.iloc[0]
+        g = row.get("mean_e_growth_rate", None)
+        if g is None or (isinstance(g, float) and pd.isna(g)):
+            g = None
+        else:
+            try:
+                g = float(g)
+            except (ValueError, TypeError):
+                g = None
+        return {
+            "stock_code": simple,
+            "stock_name": str(row.get("code_name", "")),
+            "mean_e_growth_rate": g,
+            "report_infos": str(row.get("report_infos", "")),
+            "industry": str(row.get("industry", "")),
+        }
+    except Exception:
+        return None
 
-    支持回测：
-    - 如果传入 as_of_date，则只使用该日期之前、且在 lookback_days 天窗口内的研报
-    - 如果不传 as_of_date，则使用最近一段时间（约 30 天内的一组研报）
 
-    Args:
-        stock_code (str): 6 位股票代码，如 "600519"
-        as_of_date (str | None): 评估日期，格式 "YYYY-MM-DD"，用于回测
-        lookback_days (int): 向前回看的天数窗口（默认 60 天）
+def get_recent_predict_peTTM(stock_code, as_of_date=None, lookback_days=60, from_api=False):
     """
+    获取研报预测的盈利增长率 g。默认仅从本地 meta.csv 读取；from_api=True 时从 akshare 拉取。
+    """
+    if not from_api:
+        local = _load_predict_from_local(stock_code)
+        if local is not None:
+            return local
+        return None
     report_df = ak.stock_research_report_em(symbol=stock_code)
     
     # 检查接口返回的所有列，查找年份相关的列
@@ -690,17 +631,27 @@ def get_recent_predict_peTTM(stock_code, as_of_date=None, lookback_days=60):
         ])
     report_infos_str = '\n'.join([row_to_str(row) for _, row in report_df.iterrows()])
 
-    # 获取股票所属行业信息
+    # 获取股票所属行业信息：仅从 meta.csv 读取（from_api 时若 meta 无则用 akshare）
     industry = ""
-    try:
-        stock_detail = ak.stock_individual_info_em(symbol=stock_code)
-        # 从 item/value 结构中提取“行业”
-        industry_series = stock_detail.loc[stock_detail["item"] == "行业", "value"]
-        if not industry_series.empty:
-            industry = str(industry_series.iloc[0])
-    except Exception:
-        # 行业获取失败时保持为空字符串，避免中断主流程
-        industry = ""
+    meta_path = COMPANY_STOCK_INFO_DIR / "meta.csv"
+    simple = str(stock_code).strip().split(".")[-1] if "." in str(stock_code) else str(stock_code).strip()
+    if len(simple) == 6 and meta_path.exists():
+        try:
+            meta_df = pd.read_csv(meta_path, encoding="utf-8-sig")
+            meta_df["_simple"] = meta_df["code"].astype(str).str.split(".").str[-1]
+            match = meta_df[meta_df["_simple"] == simple]
+            if not match.empty:
+                industry = str(match["industry"].iloc[0])
+        except Exception:
+            pass
+    if not industry and from_api:
+        try:
+            stock_detail = ak.stock_individual_info_em(symbol=stock_code)
+            industry_series = stock_detail.loc[stock_detail["item"] == "行业", "value"]
+            if not industry_series.empty:
+                industry = str(industry_series.iloc[0])
+        except Exception:
+            pass
 
     # 将最终结果保存到字典中
     res = dict()

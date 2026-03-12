@@ -22,7 +22,7 @@ from typing import Optional, List, Tuple, Any
 
 import pandas as pd
 
-DEFAULT_WORKERS = 8
+DEFAULT_WORKERS = 1
 MAX_FETCH_RETRIES = 3
 RETRY_DELAY_SEC = 2
 
@@ -82,13 +82,11 @@ def _load_stock_list(csv_path: Path):
 
 
 def _get_industry(simple_code: str) -> str:
+    """获取股票申万一级行业（如：商贸零售、食品饮料）。"""
     _ensure_src_path()
     try:
-        import akshare as ak
-        detail = ak.stock_individual_info_em(symbol=simple_code)
-        industry_series = detail.loc[detail["item"] == "行业", "value"]
-        if not industry_series.empty:
-            return str(industry_series.iloc[0])
+        from stock_analysis import get_sw_industry
+        return get_sw_industry(simple_code)
     except Exception:
         pass
     return ""
@@ -270,6 +268,7 @@ def main():
     parser.add_argument("--skip-industry", action="store_true", help="skip industry fetch (save time)")
     parser.add_argument("--skip-predict", action="store_true", help="skip predict fetch (save time)")
     parser.add_argument("--limit", type=int, default=0, help="process first N symbols (0=all, for testing)")
+    parser.add_argument("--skip", type=int, default=0, help="skip first N symbols, resume from (N+1)th (e.g. --skip 242)")
     parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS, help=f"concurrent workers (default {DEFAULT_WORKERS})")
     args = parser.parse_args()
 
@@ -284,6 +283,9 @@ def main():
     meta_path = COMPANY_STOCK_INFO_DIR / "meta.csv"
 
     codes, names = _load_stock_list(stock_list_path)
+    if args.skip > 0:
+        codes = codes[args.skip:]
+        print(f"Skipped first {args.skip} symbols, processing from #{args.skip + 1} (--skip={args.skip})")
     if args.limit > 0:
         codes = codes[: args.limit]
         print(f"Processing first {len(codes)} symbols (--limit={args.limit})")
@@ -299,6 +301,11 @@ def main():
     today = datetime.now().strftime("%Y-%m-%d")
     _save_trading_dates(bs_mod, today)
     bs_mod.logout()
+
+    # 若需行业信息，预先构建申万行业映射缓存，避免多线程并发构建
+    if not args.skip_industry:
+        from stock_analysis import get_sw_industry
+        _ = get_sw_industry("000001")  # 触发缓存构建或加载
 
     # 构建任务列表
     tasks: List[dict] = []
@@ -330,8 +337,8 @@ def main():
             "incremental": args.incremental,
             "skip_industry": args.skip_industry,
             "skip_predict": args.skip_predict,
-            "idx": i,
-            "total": len(codes),
+            "idx": i + args.skip,
+            "total": len(codes) + args.skip,
         })
 
     if skip_count > 0:

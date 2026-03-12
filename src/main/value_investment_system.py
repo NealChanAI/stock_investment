@@ -141,6 +141,7 @@ class ValueInvestmentSystem:
         4. g > 10% (根据券商未来三年预估)
         5. 组合中股票数量: 不大于20只
         6. 未超过行业最大股票数量5只
+        7. 组合行业数量: 不大于10个（若已达10个行业，仅可买入已有行业的股票）
         
         Args:
             stock_info: 股票信息字典，应包含以下字段：
@@ -192,10 +193,15 @@ class ValueInvestmentSystem:
             reasons.append(f"组合股票数量={len(self.portfolio)} >= {self.config['max_stocks']}")
         
         # 条件6: 未超过行业最大股票数量
-        industry = stock_info.get('industry', '')
-        industry_stock_count = sum(1 for s in self.portfolio if s.get('industry') == industry)
+        industry = stock_info.get('industry', '') or '未知'
+        industry_stock_count = sum(1 for s in self.portfolio if (s.get('industry') or '未知') == industry)
         if industry_stock_count >= self.config['max_stocks_per_industry']:
             reasons.append(f"行业'{industry}'股票数量={industry_stock_count} >= {self.config['max_stocks_per_industry']}")
+        
+        # 条件7: 组合行业数量不大于10个。若已达10个行业且该股票所属行业不在其中，则不可买入
+        portfolio_industries = {s.get('industry') or '未知' for s in self.portfolio}
+        if len(portfolio_industries) >= self.config['max_industries'] and industry not in portfolio_industries:
+            reasons.append(f"组合已达{self.config['max_industries']}个行业，且'{industry}'不在其中")
         
         # 如果所有条件都满足，reasons为空
         return len(reasons) == 0, reasons
@@ -508,17 +514,24 @@ class ValueInvestmentSystem:
             print("没有符合买入条件的股票")
             return []
         
-        # 按行业分组，每个行业最多选择max_stocks_per_industry只
+        # 按行业分组：每行业最多5只，组合最多10个行业（文档：行业数量10，行业最大股票数量5）
         selected_stocks = []
         industry_counts = {}
+        max_industries = self.config['max_industries']
+        max_per_industry = self.config['max_stocks_per_industry']
         
         for _, row in buyable_df.iterrows():
             industry = row['industry']
             if not industry:
                 industry = '未知'
             
-            # 检查行业股票数量限制
-            if industry_counts.get(industry, 0) >= self.config['max_stocks_per_industry']:
+            # 检查行业股票数量限制：每行业最多5只
+            if industry_counts.get(industry, 0) >= max_per_industry:
+                continue
+            
+            # 检查行业数量限制：最多10个行业。若已达10个行业且该股票所属行业不在其中，则跳过
+            n_industries = len(industry_counts)
+            if n_industries >= max_industries and industry not in industry_counts:
                 continue
             
             # 检查总股票数量限制

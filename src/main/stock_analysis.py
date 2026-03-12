@@ -2,6 +2,7 @@
 zhongmian stock analysis
 """
 
+import json
 import pandas as pd
 import baostock as bs
 import akshare as ak
@@ -11,6 +12,64 @@ from typing import Optional
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 COMPANY_STOCK_INFO_DIR = ROOT_DIR / "data" / "company_stock_info"
+COMPANY_RESEARCH_DIR = ROOT_DIR / "data" / "company_research"
+SW_INDUSTRY_MAP_PATH = COMPANY_STOCK_INFO_DIR / "sw_industry_map.csv"
+
+
+def _build_sw_industry_map() -> dict:
+    """从 akshare 申万接口构建 股票代码->申万一级行业 映射并缓存到文件。"""
+    result = {}
+    try:
+        first_df = ak.sw_index_first_info()
+        for _, row in first_df.iterrows():
+            code = str(row.get("行业代码", "")).strip()
+            if not code:
+                continue
+            try:
+                cons_df = ak.sw_index_third_cons(symbol=code)
+                if cons_df.empty or "股票代码" not in cons_df.columns or "申万1级" not in cons_df.columns:
+                    continue
+                for _, r in cons_df.iterrows():
+                    stock_code = str(r.get("股票代码", "")).strip()
+                    industry = str(r.get("申万1级", "")).strip()
+                    if stock_code and industry:
+                        simple = stock_code.replace(".SH", "").replace(".SZ", "").split(".")[-1]
+                        if len(simple) == 6 and simple.isdigit():
+                            result[simple] = industry
+            except Exception:
+                continue
+        if result:
+            pd.DataFrame([{"code": k, "industry": v} for k, v in result.items()]).to_csv(
+                SW_INDUSTRY_MAP_PATH, index=False, encoding="utf-8-sig"
+            )
+    except Exception:
+        pass
+    return result
+
+
+def get_sw_industry(simple_code: str) -> str:
+    """
+    获取股票申万一级行业（如：商贸零售、食品饮料）。
+    优先从 sw_industry_map.csv 缓存读取，若无则从 akshare 申万接口构建映射。
+    """
+    simple = str(simple_code).strip().replace(".SH", "").replace(".SZ", "")
+    if "." in simple:
+        simple = simple.split(".")[-1]
+    if len(simple) != 6 or not simple.isdigit():
+        return ""
+    # 1. 从 sw_industry_map.csv 缓存读取
+    if SW_INDUSTRY_MAP_PATH.exists():
+        try:
+            cache_df = pd.read_csv(SW_INDUSTRY_MAP_PATH, encoding="utf-8-sig")
+            cache_df["_simple"] = cache_df["code"].astype(str).str.replace(r"\D", "", regex=True).str.zfill(6).str[-6:]
+            match = cache_df[cache_df["_simple"] == simple]
+            if not match.empty:
+                return str(match["industry"].iloc[0]).strip()
+        except Exception:
+            pass
+    # 3. 构建映射并查找
+    mapping = _build_sw_industry_map()
+    return mapping.get(simple, "")
 
 
 def baostock_login():
@@ -436,14 +495,153 @@ def _load_predict_from_local(stock_code: str):
         return None
 
 
+def _parse_forecasts_json(raw) -> Optional[dict]:
+    """解析 extracted_forecasts JSON，返回 {year: {pe, eps}, ...}"""
+    if pd.isna(raw):
+        return None
+    s = str(raw).strip()
+    if not s or s.startswith("[ERROR]"):
+        return None
+    s = s.replace('""', '"')
+    try:
+        data = json.loads(s)
+    except json.JSONDecodeError:
+        return None
+    forecasts = data.get("forecasts")
+    if not isinstance(forecasts, list):
+        return None
+    result = {}
+    for item in forecasts:
+        if not isinstance(item, dict):
+            continue
+        year = item.get("year")
+        if year is None:
+            continue
+        try:
+            year = int(year)
+        except (TypeError, ValueError):
+            continue
+        pe, eps = item.get("pe"), item.get("eps")
+        if pe is not None and not isinstance(pe, (int, float)):
+            pe = None
+        if eps is not None and not isinstance(eps, (int, float)):
+            eps = None
+        result[year] = {"pe": pe, "eps": eps}
+    return result if result else None
+
+
+def _compute_g_from_forecasts(forecasts: dict) -> Optional[float]:
+    """
+    从 forecasts {year: {pe, eps}} 计算 EPS 年化增长率 g（小数形式）。
+    优先用 EPS，无则用 PE：g = (PE_start/PE_end)^(1/n) - 1
+    """
+    years = sorted([y for y in forecasts.keys() if forecasts[y].get("eps") or forecasts[y].get("pe")])
+    if len(years) < 2:
+        return None
+    y1, y2 = years[0], years[-1]
+    n = y2 - y1
+    if n <= 0:
+        return None
+    d1, d2 = forecasts[y1], forecasts[y2]
+    eps1, eps2 = d1.get("eps"), d2.get("eps")
+    pe1, pe2 = d1.get("pe"), d2.get("pe")
+    if eps1 and eps2 and eps1 > 0 and eps2 > 0:
+        ratio = eps2 / eps1
+    elif pe1 and pe2 and pe1 > 0 and pe2 > 0:
+        ratio = pe1 / pe2
+    else:
+        return None
+    try:
+        g = (ratio ** (1.0 / n)) - 1
+        return float(g) if not isinstance(g, complex) else float(g.real)
+    except (ValueError, TypeError):
+        return None
+
+
+def _load_predict_from_company_research(
+    stock_code: str, as_of_date: str, lookback_days: int = 60
+) -> Optional[dict]:
+    """
+    从 company_research 研报 CSV 中，筛选 publish_time <= as_of_date 且在 lookback_days 内的报告，
+    解析 extracted_forecasts 计算 mean_e_growth_rate。
+    """
+    simple = str(stock_code).strip().split(".")[-1] if "." in str(stock_code) else str(stock_code).strip()
+    if len(simple) != 6:
+        return None
+    code_6 = simple.zfill(6)
+    if not COMPANY_RESEARCH_DIR.exists():
+        return None
+    candidates = list(COMPANY_RESEARCH_DIR.glob(f"reports_{code_6}_*.csv"))
+    if not candidates:
+        candidates = [f for f in COMPANY_RESEARCH_DIR.glob("reports_*.csv") if len(f.stem.split("_")) >= 2 and f.stem.split("_")[1] == code_6]
+    if not candidates:
+        return None
+    csv_path = candidates[0]
+    try:
+        df = pd.read_csv(csv_path, encoding="utf-8-sig")
+    except Exception:
+        return None
+    if "extracted_forecasts" not in df.columns or "publish_time" not in df.columns:
+        return None
+    as_of_ts = pd.to_datetime(as_of_date)
+    start_ts = as_of_ts - pd.Timedelta(days=lookback_days)
+    wider_start = as_of_ts - pd.Timedelta(days=365)
+    df["_pt"] = pd.to_datetime(df["publish_time"], errors="coerce")
+    mask = (df["_pt"] <= as_of_ts) & (df["_pt"] >= start_ts)
+    if not mask.any():
+        mask = (df["_pt"] <= as_of_ts) & (df["_pt"] >= wider_start)
+    df = df.loc[mask].copy()
+    if df.empty:
+        return None
+    growth_rates = []
+    stock_name = ""
+    for _, row in df.iterrows():
+        f = _parse_forecasts_json(row.get("extracted_forecasts"))
+        if f:
+            g = _compute_g_from_forecasts(f)
+            if g is not None:
+                growth_rates.append(g)
+        if not stock_name and pd.notna(row.get("stock_name")):
+            stock_name = str(row["stock_name"])
+    if not growth_rates:
+        return None
+    mean_g = sum(growth_rates) / len(growth_rates)
+    industry = ""
+    meta_path = COMPANY_STOCK_INFO_DIR / "meta.csv"
+    if meta_path.exists():
+        try:
+            meta = pd.read_csv(meta_path, encoding="utf-8-sig")
+            meta["_simple"] = meta["code"].astype(str).str.replace(r"\D", "", regex=True).str.zfill(6).str[-6:]
+            match = meta[meta["_simple"] == code_6]
+            if not match.empty:
+                industry = str(match["industry"].iloc[0])
+        except Exception:
+            pass
+    return {
+        "stock_code": simple,
+        "stock_name": stock_name or "",
+        "mean_e_growth_rate": mean_g,
+        "report_infos": f"company_research {len(growth_rates)} reports",
+        "industry": industry,
+    }
+
+
 def get_recent_predict_peTTM(stock_code, as_of_date=None, lookback_days=60, from_api=False):
     """
-    获取研报预测的盈利增长率 g。默认仅从本地 meta.csv 读取；from_api=True 时从 akshare 拉取。
+    获取研报预测的盈利增长率 g。
+    - from_api=True: 从 akshare 拉取
+    - as_of_date 有值: 从 company_research 按日期筛选研报计算 g（支持回测）
+    - 否则: 从 meta.csv 读取
     """
     if not from_api:
-        local = _load_predict_from_local(stock_code)
-        if local is not None:
-            return local
+        date_to_use = as_of_date or datetime.now().strftime("%Y-%m-%d")
+        res = _load_predict_from_company_research(stock_code, date_to_use, lookback_days)
+        if res is not None:
+            return res
+        if not as_of_date:
+            local = _load_predict_from_local(stock_code)
+            if local is not None:
+                return local
         return None
     report_df = ak.stock_research_report_em(symbol=stock_code)
     
@@ -631,27 +829,11 @@ def get_recent_predict_peTTM(stock_code, as_of_date=None, lookback_days=60, from
         ])
     report_infos_str = '\n'.join([row_to_str(row) for _, row in report_df.iterrows()])
 
-    # 获取股票所属行业信息：仅从 meta.csv 读取（from_api 时若 meta 无则用 akshare）
+    # 获取股票所属行业信息：申万一级行业。优先从 meta.csv 读取，from_api 时若无则从申万接口构建缓存获取
     industry = ""
-    meta_path = COMPANY_STOCK_INFO_DIR / "meta.csv"
     simple = str(stock_code).strip().split(".")[-1] if "." in str(stock_code) else str(stock_code).strip()
-    if len(simple) == 6 and meta_path.exists():
-        try:
-            meta_df = pd.read_csv(meta_path, encoding="utf-8-sig")
-            meta_df["_simple"] = meta_df["code"].astype(str).str.split(".").str[-1]
-            match = meta_df[meta_df["_simple"] == simple]
-            if not match.empty:
-                industry = str(match["industry"].iloc[0])
-        except Exception:
-            pass
-    if not industry and from_api:
-        try:
-            stock_detail = ak.stock_individual_info_em(symbol=stock_code)
-            industry_series = stock_detail.loc[stock_detail["item"] == "行业", "value"]
-            if not industry_series.empty:
-                industry = str(industry_series.iloc[0])
-        except Exception:
-            pass
+    if len(simple) == 6:
+        industry = get_sw_industry(simple)
 
     # 将最终结果保存到字典中
     res = dict()
@@ -713,11 +895,9 @@ def get_stock_info(stock_code, target_date=None):
     else:
         sim_stock_code = stock_code
         stock_code = add_stock_prefix(stock_code) 
-    pe_res = get_pe_info(stock_code, target_date) 
-    predict_g_res = get_recent_predict_peTTM(sim_stock_code)
-    merge_res = get_merge_info(pe_res, predict_g_res)
-    print(merge_res)
-    return merge_res
+    pe_res = get_pe_info(stock_code, target_date)
+    predict_g_res = get_recent_predict_peTTM(sim_stock_code, as_of_date=target_date)
+    return get_merge_info(pe_res, predict_g_res)
     
 
 def main():

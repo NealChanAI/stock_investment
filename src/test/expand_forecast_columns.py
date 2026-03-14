@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 # 将 extracted_forecasts 的 JSON 解析后拆分为 12 个字段：
 # 2年前、1年前、当年、明年、后年、大后年 的 PE 和 EPS（以研报 publish_time 为基准年）。
-# 用法：python expand_forecast_columns.py [csv_path]
-# 不传参数则处理 data/company_research 下所有 CSV。
+# 用法：
+#   python expand_forecast_columns.py [csv_path]     # 处理单个文件
+#   python expand_forecast_columns.py                # 处理全部
+#   python expand_forecast_columns.py --hs300       # 仅处理沪深300
 
+import argparse
 import json
 import re
 import sys
@@ -13,7 +16,9 @@ from typing import Any, Dict, Optional
 import pandas as pd
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
-COMPANY_RESEARCH_DIR = ROOT_DIR / "data" / "company_research"
+DATA_DIR = ROOT_DIR / "data"
+COMPANY_RESEARCH_DIR = DATA_DIR / "company_research"
+HS300_STOCKS_CSV = DATA_DIR / "hs300_stocks.csv"
 EXTRACTED_COLUMN = "extracted_forecasts"
 PUBLISH_TIME_COLUMN = "publish_time"
 
@@ -30,6 +35,27 @@ TIME_LABELS = [
 NEW_COLUMNS = [f"PE_{label}" for _, label in TIME_LABELS] + [
     f"EPS_{label}" for _, label in TIME_LABELS
 ]
+
+
+def _get_hs300_codes() -> set:
+    """从 data/hs300_stocks.csv 读取沪深300成分股代码。"""
+    if not HS300_STOCKS_CSV.exists():
+        return set()
+    df = pd.read_csv(HS300_STOCKS_CSV)
+    codes = df["code"].astype(str).str.replace(r"^(sh|sz)\.", "", regex=True)
+    return set(codes.dropna().tolist())
+
+
+def _code_from_csv_path(csv_path: Path) -> Optional[str]:
+    """从 reports_{code}_{name}.csv 提取 6 位股票代码。"""
+    stem = csv_path.stem
+    if not stem.startswith("reports_"):
+        return None
+    rest = stem.replace("reports_", "", 1)
+    parts = rest.split("_", 1)
+    if parts and len(parts[0]) == 6 and parts[0].isdigit():
+        return parts[0]
+    return None
 
 
 def parse_publish_year(publish_time: Any) -> Optional[int]:
@@ -140,8 +166,13 @@ def process_csv(csv_path: Path) -> None:
 
 
 def main():
-    if len(sys.argv) >= 2:
-        csv_path = Path(sys.argv[1]).resolve()
+    parser = argparse.ArgumentParser(description="将 extracted_forecasts 解析为 12 列 PE/EPS")
+    parser.add_argument("csv_path", nargs="?", type=str, help="可选：单个 CSV 文件路径")
+    parser.add_argument("--hs300", action="store_true", help="仅处理沪深300成分股")
+    args = parser.parse_args()
+
+    if args.csv_path:
+        csv_path = Path(args.csv_path).resolve()
         if not csv_path.exists():
             print(f"文件不存在: {csv_path}")
             sys.exit(1)
@@ -154,6 +185,13 @@ def main():
         sys.exit(1)
 
     csv_files = sorted(COMPANY_RESEARCH_DIR.rglob("*.csv"))
+    if args.hs300:
+        hs300_codes = _get_hs300_codes()
+        if not hs300_codes:
+            print(f"未找到沪深300列表: {HS300_STOCKS_CSV}")
+            sys.exit(1)
+        csv_files = [p for p in csv_files if _code_from_csv_path(p) in hs300_codes]
+        print(f"仅处理沪深300: {len(csv_files)} 个 CSV")
     print(f"共 {len(csv_files)} 个 CSV，开始处理...")
     for p in csv_files:
         print(p.relative_to(COMPANY_RESEARCH_DIR))

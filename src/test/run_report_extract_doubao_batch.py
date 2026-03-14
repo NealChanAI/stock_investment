@@ -2,7 +2,13 @@
 # 遍历 data/company_research 下所有 CSV，对 content 列逐行跑豆包 LLM 提取财务预测，结果写入新列。
 # 公司串行、公司内研报并行。已完全处理的公司自动跳过。
 # 依赖：pip install openai pandas
+#
+# 用法：
+#   python run_report_extract_doubao_batch.py           # 处理全部
+#   python run_report_extract_doubao_batch.py --hs300   # 仅处理沪深300
+#   python run_report_extract_doubao_batch.py --hs300 --start-from 601888  # 从中国中免开始（断点续跑）
 
+import argparse
 import os
 import sys
 import warnings
@@ -29,6 +35,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT_DIR / "data"
 PROMPTS_DIR = DATA_DIR / "prompts"
 COMPANY_RESEARCH_DIR = DATA_DIR / "company_research"
+HS300_STOCKS_CSV = DATA_DIR / "hs300_stocks.csv"
 SYSTEM_PROMPT_PATH = PROMPTS_DIR / "PE_extract.txt"
 OUTPUT_COLUMN = "extracted_forecasts"
 MAX_RETRIES = 3
@@ -47,6 +54,27 @@ def _is_valid_result(val) -> bool:
         return False
     s = str(val).strip()
     return len(s) > 0 and not s.startswith("[ERROR]")
+
+
+def _get_hs300_codes() -> set:
+    """从 data/hs300_stocks.csv 读取沪深300成分股代码。"""
+    if not HS300_STOCKS_CSV.exists():
+        return set()
+    df = pd.read_csv(HS300_STOCKS_CSV)
+    codes = df["code"].astype(str).str.replace(r"^(sh|sz)\.", "", regex=True)
+    return set(codes.dropna().tolist())
+
+
+def _code_from_csv_path(csv_path: Path) -> Optional[str]:
+    """从 reports_{code}_{name}.csv 提取 6 位股票代码。"""
+    stem = csv_path.stem
+    if not stem.startswith("reports_"):
+        return None
+    rest = stem.replace("reports_", "", 1)
+    parts = rest.split("_", 1)
+    if parts and len(parts[0]) == 6 and parts[0].isdigit():
+        return parts[0]
+    return None
 
 
 def is_fully_processed(csv_path: Path) -> bool:
@@ -165,6 +193,11 @@ def process_one_csv(
 
 
 def main():
+    parser = argparse.ArgumentParser(description="研报 LLM 提取（豆包）")
+    parser.add_argument("--hs300", action="store_true", help="仅处理沪深300成分股")
+    parser.add_argument("--start-from", type=str, metavar="CODE", help="从指定股票代码开始（含），用于断点续跑，如 601888")
+    args = parser.parse_args()
+
     if not COMPANY_RESEARCH_DIR.exists():
         _log(f"目录不存在: {COMPANY_RESEARCH_DIR}")
         sys.exit(1)
@@ -177,6 +210,27 @@ def main():
     if not csv_files:
         _log(f"未找到 CSV 文件: {COMPANY_RESEARCH_DIR}")
         return
+
+    if args.hs300:
+        hs300_codes = _get_hs300_codes()
+        if not hs300_codes:
+            _log(f"未找到沪深300列表: {HS300_STOCKS_CSV}")
+            sys.exit(1)
+        csv_files = [p for p in csv_files if _code_from_csv_path(p) in hs300_codes]
+        _log(f"仅处理沪深300: {len(csv_files)} 个公司")
+
+    if args.start_from:
+        code = str(args.start_from).strip().zfill(6)
+        start_idx = None
+        for i, p in enumerate(csv_files):
+            if _code_from_csv_path(p) == code:
+                start_idx = i
+                break
+        if start_idx is not None:
+            csv_files = csv_files[start_idx:]
+            _log(f"从 {code} 开始，剩余 {len(csv_files)} 个公司")
+        else:
+            _log(f"未找到代码 {code}，将处理全部")
 
     total_companies = len(csv_files)
     to_run = [p for p in csv_files if not is_fully_processed(p)]

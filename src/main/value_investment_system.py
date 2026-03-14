@@ -45,6 +45,7 @@ class ValueInvestmentSystem:
             # 其他配置
             'rebalance_period_months': 6,  # 再平衡周期（月）
             'use_mean_pe_5y': True,  # 使用5年PE均值还是10年PE均值
+            'predict_log_path': None,  # 若设置，每次评估时将预测期相关股票信息输出到该文件
         }
         
         # 合并用户配置和默认配置
@@ -57,7 +58,29 @@ class ValueInvestmentSystem:
         
         # 组合历史记录
         self.portfolio_history: List[Dict] = []
-    
+
+    def _append_predict_log(
+        self, log_path: str, target_date: str, stock_info: dict, result: dict
+    ) -> None:
+        """将预测期相关股票信息追加到日志文件。"""
+        try:
+            path = Path(log_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(f"\n{'='*70}\n")
+                f.write(f"评估日: {target_date} | {result.get('stock_code', '')} {result.get('stock_name', '')}\n")
+                f.write(f"{'='*70}\n")
+                f.write(f"PE(当前): {stock_info.get('pettm_at_date')} | PE(均值): {result.get('pe_mean')} | G: {result.get('growth_rate', 0):.2f}% | 预估收益: {result.get('target_return', -100):.1f}%\n")
+                f.write(f"研报窗口: {stock_info.get('g_window', '')} | {stock_info.get('report_infos', '')}\n")
+                details = stock_info.get("report_details", [])
+                if details:
+                    f.write("研报详情:\n")
+                    for i, d in enumerate(details, 1):
+                        g_str = f"g={d['g']:.4f}" if d.get("g") is not None else "无法计算g"
+                        f.write(f"  [{i}] {d.get('publish_time', '')} {d.get('org_name', '')} | {d.get('forecasts', '')[:60]}... | {g_str}\n")
+        except Exception:
+            pass
+
     def calculate_peg(self, pe: float, g: float) -> float:
         """
         计算PEG值
@@ -462,6 +485,11 @@ class ValueInvestmentSystem:
                 }
                 
                 results.append(result)
+
+                # 若配置了 predict_log_path，输出预测期相关股票信息到文件
+                log_path = self.config.get('predict_log_path')
+                if log_path and target_date:
+                    self._append_predict_log(log_path, target_date, stock_info, result)
                 
                 status = "✅ 符合买入条件" if can_buy else f"❌ 不符合: {', '.join(reasons[:2])}"
                 print(f"  {status}")
@@ -514,11 +542,25 @@ class ValueInvestmentSystem:
             print("没有符合买入条件的股票")
             return []
         
+        max_industries = self.config['max_industries']
+        max_per_industry = self.config['max_stocks_per_industry']
+        
+        # 符合买入条件的股票按行业分布（有行业超限时打印详情）
+        industry_series = buyable_df['industry'].apply(
+            lambda x: (str(x).strip() if pd.notna(x) and str(x).strip() else '未知')
+        )
+        buyable_industry_counts = industry_series.value_counts()
+        if (buyable_industry_counts > max_per_industry).any():
+            print(f"\n符合买入条件 {len(buyable_df)} 只，按行业分布:")
+            for ind, cnt in buyable_industry_counts.items():
+                cap_note = f" (仅选{max_per_industry}只，跳过{cnt - max_per_industry}只)" if cnt > max_per_industry else ""
+                print(f"  {ind}: {cnt}只{cap_note}")
+        
         # 按行业分组：每行业最多5只，组合最多10个行业（文档：行业数量10，行业最大股票数量5）
         selected_stocks = []
         industry_counts = {}
-        max_industries = self.config['max_industries']
-        max_per_industry = self.config['max_stocks_per_industry']
+        skipped_by_industry_cap = 0
+        skipped_by_industry_count = 0
         
         for _, row in buyable_df.iterrows():
             industry = row['industry']
@@ -527,11 +569,13 @@ class ValueInvestmentSystem:
             
             # 检查行业股票数量限制：每行业最多5只
             if industry_counts.get(industry, 0) >= max_per_industry:
+                skipped_by_industry_cap += 1
                 continue
             
             # 检查行业数量限制：最多10个行业。若已达10个行业且该股票所属行业不在其中，则跳过
             n_industries = len(industry_counts)
             if n_industries >= max_industries and industry not in industry_counts:
+                skipped_by_industry_count += 1
                 continue
             
             # 检查总股票数量限制
@@ -545,6 +589,8 @@ class ValueInvestmentSystem:
         
         print(f"\n共选出 {len(selected_stocks)} 只股票")
         print(f"涉及 {len(industry_counts)} 个行业")
+        if skipped_by_industry_cap > 0 or skipped_by_industry_count > 0:
+            print(f"因行业限制跳过: 单行业超限 {skipped_by_industry_cap} 只，行业数超限 {skipped_by_industry_count} 只")
         
         return selected_stocks
     

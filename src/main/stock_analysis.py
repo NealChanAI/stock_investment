@@ -559,11 +559,12 @@ def _compute_g_from_forecasts(forecasts: dict) -> Optional[float]:
 
 
 def _load_predict_from_company_research(
-    stock_code: str, as_of_date: str, lookback_days: int = 60
+    stock_code: str, as_of_date: str, lookback_days: int = 90
 ) -> Optional[dict]:
     """
     从 company_research 研报 CSV 中，筛选 publish_time <= as_of_date 且在 lookback_days 内的报告，
     解析 extracted_forecasts 计算 mean_e_growth_rate。
+    优先使用最近 90 天内的研报，若无则放宽到 360 天。
     """
     simple = str(stock_code).strip().split(".")[-1] if "." in str(stock_code) else str(stock_code).strip()
     if len(simple) != 6:
@@ -585,22 +586,33 @@ def _load_predict_from_company_research(
         return None
     as_of_ts = pd.to_datetime(as_of_date)
     start_ts = as_of_ts - pd.Timedelta(days=lookback_days)
-    wider_start = as_of_ts - pd.Timedelta(days=365)
+    wider_start = as_of_ts - pd.Timedelta(days=360)  # 90天内无有效研报时放宽到360天
     df["_pt"] = pd.to_datetime(df["publish_time"], errors="coerce")
-    mask = (df["_pt"] <= as_of_ts) & (df["_pt"] >= start_ts)
+    mask_90 = (df["_pt"] <= as_of_ts) & (df["_pt"] >= start_ts)
+    mask = mask_90
     if not mask.any():
         mask = (df["_pt"] <= as_of_ts) & (df["_pt"] >= wider_start)
+    window_used = "90天" if mask_90.any() else "360天"
     df = df.loc[mask].copy()
     if df.empty:
         return None
     growth_rates = []
+    report_details = []
     stock_name = ""
     for _, row in df.iterrows():
         f = _parse_forecasts_json(row.get("extracted_forecasts"))
-        if f:
-            g = _compute_g_from_forecasts(f)
-            if g is not None:
-                growth_rates.append(g)
+        g = _compute_g_from_forecasts(f) if f else None
+        if g is not None:
+            growth_rates.append(g)
+        # 记录每篇研报详情（含解析失败或仅1年无法算g的）
+        f_str = ", ".join([f"{y}: eps={v.get('eps')} pe={v.get('pe')}" for y, v in sorted(f.items())]) if f else "解析失败"
+        report_details.append({
+            "publish_time": str(row.get("publish_time", "")),
+            "org_name": str(row.get("org_name", "")),
+            "title": (str(row.get("title", "")) or "")[:80],
+            "forecasts": f_str,
+            "g": round(g, 4) if g is not None else None,
+        })
         if not stock_name and pd.notna(row.get("stock_name")):
             stock_name = str(row["stock_name"])
     if not growth_rates:
@@ -621,12 +633,14 @@ def _load_predict_from_company_research(
         "stock_code": simple,
         "stock_name": stock_name or "",
         "mean_e_growth_rate": mean_g,
-        "report_infos": f"company_research {len(growth_rates)} reports",
+        "report_infos": f"company_research {len(growth_rates)} reports ({window_used})",
         "industry": industry,
+        "report_details": report_details,
+        "g_window": window_used,
     }
 
 
-def get_recent_predict_peTTM(stock_code, as_of_date=None, lookback_days=60, from_api=False):
+def get_recent_predict_peTTM(stock_code, as_of_date=None, lookback_days=90, from_api=False):
     """
     获取研报预测的盈利增长率 g。
     - from_api=True: 从 akshare 拉取
@@ -719,14 +733,14 @@ def get_recent_predict_peTTM(stock_code, as_of_date=None, lookback_days=60, from
         mask = (report_df['date'] <= as_of_ts) & (report_df['date'] >= start_ts)
         filtered_df = report_df.loc[mask].copy()
 
-        # 如果窗口内没有研报，尝试放宽窗口到 365 天；仍然没有则返回 None
+        # 如果窗口内没有研报，尝试放宽窗口到 360 天；仍然没有则返回 None
         if filtered_df.empty:
-            wider_start_ts = as_of_ts - pd.Timedelta(days=365)
+            wider_start_ts = as_of_ts - pd.Timedelta(days=360)
             mask = (report_df['date'] <= as_of_ts) & (report_df['date'] >= wider_start_ts)
             filtered_df = report_df.loc[mask].copy()
 
         if filtered_df.empty:
-            print(f"警告: 股票 {stock_code} 在 {as_of_date} 之前 {lookback_days}~365 天内无研报预测数据")
+            print(f"警告: 股票 {stock_code} 在 {as_of_date} 之前 {lookback_days}~360 天内无研报预测数据")
             return None
 
         report_df = filtered_df.reset_index(drop=True)

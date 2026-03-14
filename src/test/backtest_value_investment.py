@@ -6,7 +6,7 @@
 - 资金分 20 份，每半年再平衡
 - 输出每次选股列表和操作收益
 
-用法: python backtest_value_investment.py [--start-year 2016] [--end-year 2026]
+用法: python backtest_value_investment.py [--start-year 2016] [--end-year 2026] [--stock-list data/xxx.csv] [-o log.txt]
 """
 import argparse
 import io
@@ -86,7 +86,8 @@ def run_evaluate_silent(system, stock_codes, target_date, stock_records):
 
 def run_select_best_silent(system, stock_codes, target_date, evaluation_df, stock_records):
     old_stdout = sys.stdout
-    sys.stdout = io.StringIO()
+    buf = io.StringIO()
+    sys.stdout = buf
     try:
         best = system.select_best_stocks(
             stock_codes, target_date, evaluation_df=evaluation_df, stock_records=stock_records
@@ -94,12 +95,17 @@ def run_select_best_silent(system, stock_codes, target_date, evaluation_df, stoc
         return best
     finally:
         sys.stdout = old_stdout
+        # 将行业分布等选股日志输出到原 stdout（会写入回测日志）
+        captured = buf.getvalue()
+        if captured.strip():
+            old_stdout.write(captured)
 
 
 def main():
     parser = argparse.ArgumentParser(description="价值投资系统回测")
     parser.add_argument("--start-year", type=int, default=2016, help="回测开始年份")
     parser.add_argument("--end-year", type=int, default=2026, help="回测结束年份")
+    parser.add_argument("--stock-list", type=str, default=None, help="股票列表 CSV（默认用 stock_info_extract 的 STOCK_LIST_FILE）")
     parser.add_argument("-o", "--output", type=str, help="将日志输出到指定文件（UTF-8）")
     args = parser.parse_args()
     dates = load_trading_dates()
@@ -132,7 +138,9 @@ def main():
         sys.stdout = tee
 
     try:
-        stock_records = load_all_codes(STOCK_LIST_FILE)
+        stock_list_file = args.stock_list if args.stock_list else STOCK_LIST_FILE
+        print(f"股票池: {stock_list_file}")
+        stock_records = load_all_codes(stock_list_file)
         # 限定：仅从医药、食品、消费板块中买卖
         filtered = []
         for r in stock_records:
@@ -148,7 +156,12 @@ def main():
         stock_codes = [r["code"] for r in stock_records]
         print(f"板块限定: 仅 {ALLOWED_SECTORS}，候选股票 {len(stock_codes)} 只")
 
-        system = ValueInvestmentSystem()
+        system_config = {}
+        if args.output:
+            stem = Path(args.output).stem
+            predict_log = LOG_DIR / f"{stem}_predict.log"
+            system_config["predict_log_path"] = str(predict_log)
+        system = ValueInvestmentSystem(config=system_config)
         capital = INITIAL_CAPITAL
         positions = {}  # code -> {"shares": int, "cost": float, "stock_name": str, "industry": str}
         cash = capital
@@ -398,16 +411,27 @@ def main():
                         base += "  [" + " ".join(extras) + "]"
                 print(base)
 
-            # 7. 计算本期收益
+            # 7. 计算本期收益及年化收益率
             portfolio_value = sum(p["shares"] * (get_close(c, rb_date) or p["cost"]) for c, p in positions.items())
             total_assets = cash + portfolio_value
 
-            period_ret = (total_assets - prev_total_assets) / prev_total_assets
+            period_ret = (total_assets - prev_total_assets) / prev_total_assets if prev_total_assets > 0 else 0
             cum_ret = (total_assets - INITIAL_CAPITAL) / INITIAL_CAPITAL
 
+            # 年化收益率：(1+r)^(1/years)-1
+            prev_rb_date = rebalance_dates[i - 1] if i > 0 else rb_date
+            period_days = (datetime.strptime(rb_date, "%Y-%m-%d") - datetime.strptime(prev_rb_date, "%Y-%m-%d")).days
+            period_years = period_days / 365.0 if period_days > 0 else 0
+            period_annualized = ((1 + period_ret) ** (1 / period_years) - 1) * 100 if period_years > 0 else 0
+
+            start_date = rebalance_dates[0]
+            cum_days = (datetime.strptime(rb_date, "%Y-%m-%d") - datetime.strptime(start_date, "%Y-%m-%d")).days
+            cum_years = cum_days / 365.0 if cum_days > 0 else 0
+            cum_annualized = ((1 + cum_ret) ** (1 / cum_years) - 1) * 100 if cum_years > 0 else 0
+
             print(f"\n  总资产: {total_assets:,.0f} 元 (现金 {cash:,.0f} + 持仓 {portfolio_value:,.0f})")
-            print(f"  本期收益率: {period_ret*100:.2f}%")
-            print(f"  累计收益率: {cum_ret*100:.2f}%")
+            print(f"  本期收益率: {period_ret*100:.2f}%  本期年化: {period_annualized:.2f}%")
+            print(f"  累计收益率: {cum_ret*100:.2f}%  累计年化: {cum_annualized:.2f}%")
             print()
 
             prev_total_assets = total_assets
@@ -416,8 +440,14 @@ def main():
         print("=" * 80)
         print("回测结束")
         print("=" * 80)
+        final_cum_ret = (capital / INITIAL_CAPITAL - 1) * 100
+        start_date = rebalance_dates[0]
+        end_date = rebalance_dates[-1]
+        total_days = (datetime.strptime(end_date, "%Y-%m-%d") - datetime.strptime(start_date, "%Y-%m-%d")).days
+        total_years = total_days / 365.0 if total_days > 0 else 0
+        final_annualized = ((1 + final_cum_ret / 100) ** (1 / total_years) - 1) * 100 if total_years > 0 else 0
         print(f"最终总资产: {capital:,.0f} 元")
-        print(f"累计收益率: {(capital/INITIAL_CAPITAL-1)*100:.2f}%")
+        print(f"累计收益率: {final_cum_ret:.2f}%  累计年化: {final_annualized:.2f}%")
     finally:
         if tee:
             sys.stdout = tee.stdout

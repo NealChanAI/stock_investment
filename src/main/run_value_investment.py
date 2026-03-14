@@ -33,9 +33,14 @@ def run_value_investment_analysis(
     # 设置输出目录
     if output_dir is None:
         output_dir = OUTPUT_DIR
-    
+
+    # 合并配置：每次评估时输出预测期股票信息到 predict_YYYYMMDD_HHMMSS.log
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    merged_config = dict(config) if config else {}
+    merged_config.setdefault("predict_log_path", str(Path(output_dir) / f"predict_{timestamp}.log"))
+
     # 创建价值投资系统实例
-    system = ValueInvestmentSystem(config=config)
+    system = ValueInvestmentSystem(config=merged_config)
     
     # 加载股票列表
     print(f"正在加载股票列表: {stock_list_file}")
@@ -60,7 +65,6 @@ def run_value_investment_analysis(
     
     # 保存完整评估结果
     os.makedirs(output_dir, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     # 保存所有评估结果
     all_results_file = os.path.join(output_dir, f"value_investment_all_{timestamp}.xlsx")
